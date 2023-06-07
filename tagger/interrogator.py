@@ -38,6 +38,7 @@ class Interrogator:
         tags: Dict[str, float],
 
         threshold=0.35,
+        tag_count_threshold=100,
         additional_tags: List[str] = [],
         exclude_tags: List[str] = [],
         sort_by_alphabetical_order=False,
@@ -58,7 +59,7 @@ class Interrogator:
                 tags.items(),
                 key=lambda i: i[0 if sort_by_alphabetical_order else 1],
                 reverse=not sort_by_alphabetical_order
-            )
+            )[:tag_count_threshold]
 
             # filter tags
             if (

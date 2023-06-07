@@ -70,6 +70,7 @@ def on_interrogate(
 
     postprocess_opts = (
         threshold,
+        tag_count_threshold,
         split_str(additional_tags),
         split_str(exclude_tags),
         sort_by_alphabetical_order,
