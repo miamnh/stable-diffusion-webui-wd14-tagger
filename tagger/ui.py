@@ -36,8 +36,84 @@ def split_weighed_key(key: str):
     return (key, 0.0)
 
 
-def on_interrogate(
+def parse_confidences(rating_confidents):
+    if rating_confidents is None:
+        return None
+    confs = rating_confidents['confidences']
+    return dict(map(lambda x: (x['label'], x['confidence']), confs))
+
+
+def on_interrogate_image(
     image: Image,
+
+    interrogator: str,
+    threshold: float,
+    tag_count_threshold: float,
+    additional_tags: str,
+    exclude_tags: str,
+    search_tags: str,
+    replace_tags: str,
+    ingore_case: bool,
+    sort_by_alphabetical_order: bool,
+    add_confident_as_weight: bool,
+    replace_underscore: bool,
+    replace_underscore_excludes: str,
+    escape_tag: bool,
+
+    unload_model_after_running: bool,
+    current_tags,
+    current_rating_confidents,
+    current_tag_confidents
+):
+    # Reave the values unchanged. There is a reload which cannot be helped.
+    # Gradio docs describe a dict as output, that would prevent an update
+    # for omitted keys, but this version does not support it.
+    res = [
+        current_tags,
+        parse_confidences(current_rating_confidents),
+        parse_confidences(current_tag_confidents)
+    ]
+    if image is None:
+        return res + ['image was None']
+
+    if interrogator not in utils.interrogators:
+        return res + [f"'{interrogator}' is not a valid interrogator"]
+
+    interrogator: Interrogator = utils.interrogators[interrogator]
+
+    postprocess_opts = (
+        threshold,
+        tag_count_threshold,
+        split_str(additional_tags),
+        split_str(exclude_tags),
+        sort_by_alphabetical_order,
+        add_confident_as_weight,
+        replace_underscore,
+        split_str(replace_underscore_excludes),
+        escape_tag
+    )
+
+    # single process
+    ratings, tags = interrogator.interrogate(image)
+    processed_tags = Interrogator.postprocess_tags(
+        tags,
+        *postprocess_opts
+    )
+    if unload_model_after_running:
+        interrogator.unload()
+
+    if add_confident_as_weight:
+        processed_tags = list(map(split_weighed_key, processed_tags.keys()))
+
+    return [
+        ', '.join(processed_tags),
+        ratings,
+        dict(filter(lambda x: x[1] >= threshold / 2, tags.items())),
+        ''
+    ]
+
+
+def on_interrogate(
     batch_input_glob: str,
     batch_input_recursive: bool,
     batch_output_dir: str,
@@ -61,10 +137,19 @@ def on_interrogate(
     escape_tag: bool,
 
     unload_model_after_running: bool,
-    verbose: bool
+    verbose: bool,
+    do_batch_rewrite: bool,
+    current_tags,
+    current_rating_confidents,
+    current_tag_confidents
 ):
+    res = [
+        current_tags,
+        parse_confidences(current_rating_confidents),
+        parse_confidences(current_tag_confidents)
+    ]
     if interrogator not in utils.interrogators:
-        return ['', None, None, f"'{interrogator}' is not a valid interrogator"]
+        return res + [f"'{interrogator}' is not a valid interrogator"]
 
     interrogator: Interrogator = utils.interrogators[interrogator]
 
@@ -79,24 +164,6 @@ def on_interrogate(
         split_str(replace_underscore_excludes),
         escape_tag
     )
-
-    # single process
-    if image is not None:
-        ratings, tags = interrogator.interrogate(image)
-        processed_tags = Interrogator.postprocess_tags(
-            tags,
-            *postprocess_opts
-        )
-
-        if unload_model_after_running:
-            interrogator.unload()
-
-        return [
-            ', '.join(processed_tags.keys() if add_confident_as_weight else processed_tags),
-            ratings,
-            dict(filter(lambda x: x[1] >= threshold / 2, tags.items())),
-            ''
-        ]
 
     # batch process
     batch_input_glob = batch_input_glob.strip()
@@ -118,7 +185,7 @@ def on_interrogate(
 
         # check the input directory path
         if not os.path.isdir(base_dir):
-            return ['', None, None, 'input path is not a directory']
+            return res + ['input path is not a directory']
 
         # this line is moved here because some reason
         # PIL.Image.registered_extensions() returns only PNG if you call too early
@@ -200,7 +267,7 @@ def on_interrogate(
             output = []
 
             if output_path.is_file():
-                if batch_output_action_on_conflict != 'replace':
+                if do_batch_rewrite or batch_output_action_on_conflict != 'replace':
                     txt = output_path.read_text(errors='ignore').strip()
                     output = list(map(str.strip, txt.split(',')))
                     # read the previous interrogation count, if any
@@ -234,7 +301,7 @@ def on_interrogate(
                     for k, v in weights.items():
                         combined[k] = combined[k] + v if k in combined else v
                     continue
-            if batch_output_action_on_conflict != 'update':
+            if not do_batch_rewrite:
                 ratings, tags = interrogator.interrogate(image)
                 processed_tags = Interrogator.postprocess_tags(
                     tags,
@@ -263,20 +330,19 @@ def on_interrogate(
                             break
 
                 processed_tags = weights
+                if tag_count_threshold < len(processed_tags):
+                    processed_tags = [(k, v) for k, v in processed_tags.items()]
+                    processed_tags.sort(key=lambda x: x[1], reverse=True)
+                    processed_tags = dict(processed_tags[:int(tag_count_threshold)])
+
                 tags = list(weights.keys())
                 tags.sort(key=lambda x: weights[x], reverse=True)
                 batch_output_save_json = False
-                output = None
-
-            if tag_count_threshold < len(processed_tags):
-                processed_tags = [(k, v) for k, v in processed_tags.items()]
-                processed_tags.sort(key=lambda x: x[1], reverse=True)
-                processed_tags = dict(processed_tags[:int(tag_count_threshold)])
 
             if verbose:
                 print(f'{path}: {len(processed_tags)}/{len(tags)} tags found')
 
-            if batch_output_action_on_conflict == 'replace' or not output:
+            if batch_output_action_on_conflict == 'replace' or do_batch_rewrite:
                 for k, v in processed_tags.items():
                     k = split_weighed_key(k)[0]
                     combined[k] = combined[k] + v if k in combined else v
@@ -357,6 +423,10 @@ def on_ui_tabs():
                             interactive=True,
                             type="pil"
                         )
+                        image_submit = gr.Button(
+                            value='Interrogate image',
+                            variant='primary'
+                        )
 
                     with gr.TabItem(label='Batch from directory'):
                         batch_input_glob = utils.preset.component(
@@ -415,8 +485,7 @@ def on_ui_tabs():
                                 'ignore',
                                 'replace',
                                 'append',
-                                'prepend',
-                                'update'
+                                'prepend'
                             ]
                         )
 
@@ -430,10 +499,14 @@ def on_ui_tabs():
                             label='Save with JSON'
                         )
 
-                submit = gr.Button(
-                    value='Interrogate',
-                    variant='primary'
-                )
+                        batch_rewrite = gr.Button(
+                            value='batch write tag changes'
+                        )
+
+                        batch_submit = gr.Button(
+                            value='Interrogate',
+                            variant='primary'
+                        )
 
                 info = gr.HTML()
 
@@ -569,7 +642,8 @@ def on_ui_tabs():
                 tags = gr.Textbox(
                     label='Tags',
                     placeholder='Found tags',
-                    interactive=False
+                    interactive=False,
+                    elem_classes=':link'
                 )
 
                 with gr.Row():
@@ -607,14 +681,48 @@ def on_ui_tabs():
             fn=unload_interrogators,
             outputs=[info]
         )
+        for func in [image.change, image_submit.click]:
+            func(
+                fn=wrap_gradio_gpu_call(on_interrogate_image),
+                inputs=[
+                    image,
 
-        for func in [image.change, submit.click]:
+                    # options
+                    interrogator,
+                    threshold,
+                    tag_count_threshold,
+                    additional_tags,
+                    exclude_tags,
+                    search_tags,
+                    replace_tags,
+                    ingore_case,
+                    sort_by_alphabetical_order,
+                    add_confident_as_weight,
+                    replace_underscore,
+                    replace_underscore_excludes,
+                    escape_tag,
+
+                    unload_model_after_running,
+
+                    # when changing the image, leave the stats
+                    tags,
+                    rating_confidents,
+                    tag_confidents,
+                ],
+                outputs=[
+                    tags,
+                    rating_confidents,
+                    tag_confidents,
+
+                    # contains execution time, memory usage and other stuffs...
+                    # generated from modules.ui.wrap_gradio_call
+                    info
+                ]
+            )
+        for func in [batch_rewrite.click, batch_submit.click]:
             func(
                 fn=wrap_gradio_gpu_call(on_interrogate),
                 inputs=[
-                    # single process
-                    image,
-
                     # batch process
                     batch_input_glob,
                     batch_input_recursive,
@@ -640,15 +748,16 @@ def on_ui_tabs():
                     escape_tag,
 
                     unload_model_after_running,
-                    verbose
+                    verbose,
+                    batch_rewrite,
+                    tags,
+                    rating_confidents,
+                    tag_confidents,
                 ],
                 outputs=[
                     tags,
                     rating_confidents,
                     tag_confidents,
-
-                    # contains execution time, memory usage and other stuffs...
-                    # generated from modules.ui.wrap_gradio_call
                     info
                 ]
             )
