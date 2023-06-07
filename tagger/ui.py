@@ -55,7 +55,6 @@ def on_interrogate_image(
     replace_tags: str,
     ingore_case: bool,
     sort_by_alphabetical_order: bool,
-    add_confident_as_weight: bool,
     replace_underscore: bool,
     replace_underscore_excludes: str,
     escape_tag: bool,
@@ -81,13 +80,14 @@ def on_interrogate_image(
 
     interrogator: Interrogator = utils.interrogators[interrogator]
 
+    add_confidence_as_weight = False
     postprocess_opts = (
         threshold,
         tag_count_threshold,
         split_str(additional_tags),
         split_str(exclude_tags),
         sort_by_alphabetical_order,
-        add_confident_as_weight,
+        add_confidence_as_weight,
         replace_underscore,
         split_str(replace_underscore_excludes),
         escape_tag
@@ -101,9 +101,6 @@ def on_interrogate_image(
     )
     if unload_model_after_running:
         interrogator.unload()
-
-    if add_confident_as_weight:
-        processed_tags = list(map(split_weighed_key, processed_tags.keys()))
 
     return [
         ', '.join(processed_tags),
@@ -131,7 +128,7 @@ def on_interrogate(
     replace_tags: str,
     ingore_case: bool,
     sort_by_alphabetical_order: bool,
-    add_confident_as_weight: bool,
+    add_confidence_as_weight: bool,
     replace_underscore: bool,
     replace_underscore_excludes: str,
     escape_tag: bool,
@@ -159,7 +156,7 @@ def on_interrogate(
         split_str(additional_tags),
         split_str(exclude_tags),
         sort_by_alphabetical_order,
-        add_confident_as_weight,
+        add_confidence_as_weight,
         replace_underscore,
         split_str(replace_underscore_excludes),
         escape_tag
@@ -284,7 +281,7 @@ def on_interrogate(
                         (k, v) = split_weighed_key(output[i])
                         if v > 0.0:
                             weights[k] = v
-                            if not add_confident_as_weight:
+                            if not add_confidence_as_weight:
                                 output[i] = k
                         else:
                             # FIXME: exponential, hyperbolic, or harmonic
@@ -349,7 +346,7 @@ def on_interrogate(
                 output = [', '.join(processed_tags)]
 
             elif len(processed_tags) > 0:
-                if add_confident_as_weight:
+                if add_confidence_as_weight:
                     output = []
 
                     for k, v in processed_tags.items():
@@ -376,11 +373,11 @@ def on_interrogate(
                 else:
                     output.append(', '.join(processed_tags))
 
-            if batch_remove_duplicated_tag and not add_confident_as_weight:
+            if batch_remove_duplicated_tag and not add_confidence_as_weight:
                 output_str = ','.join(output).split(',')
                 output = OrderedDict.fromkeys(map(str.strip, output_str))
 
-            if add_confident_as_weight:
+            if add_confidence_as_weight:
                 # postpend the incremented interrogation count
                 output.append(str(ict + 1.0))
 
@@ -488,16 +485,27 @@ def on_ui_tabs():
                                 'prepend'
                             ]
                         )
+                        with gr.Row(variant='compact'):
+                            with gr.Column(variant='compact'):
 
-                        batch_remove_duplicated_tag = utils.preset.component(
-                            gr.Checkbox,
-                            label='Remove duplicated tag'
-                        )
-
-                        batch_output_save_json = utils.preset.component(
-                            gr.Checkbox,
-                            label='Save with JSON'
-                        )
+                                batch_remove_duplicated_tag = utils.preset.component(
+                                    gr.Checkbox,
+                                    label='Remove duplicated tag'
+                                )
+                                batch_output_save_json = utils.preset.component(
+                                    gr.Checkbox,
+                                    label='Save with JSON'
+                                )
+                            with gr.Column(variant='compact'):
+                                add_confidence_as_weight = utils.preset.component(
+                                    gr.Checkbox,
+                                    label='Include confidence of tags in files'
+                                )
+                                verbose = utils.preset.component(
+                                    gr.Checkbox,
+                                    # tooltip: 'Print tag counts per file, no progress bar',
+                                    label='Verbose'
+                                )
 
                         batch_rewrite = gr.Button(
                             value='batch write tag changes'
@@ -607,10 +615,6 @@ def on_ui_tabs():
                     gr.Checkbox,
                     label='Sort by alphabetical order',
                 )
-                add_confident_as_weight = utils.preset.component(
-                    gr.Checkbox,
-                    label='Include confident of tags matches in results'
-                )
                 replace_underscore = utils.preset.component(
                     gr.Checkbox,
                     label='Use spaces instead of underscore',
@@ -632,11 +636,6 @@ def on_ui_tabs():
                     label='Unload model after running',
                 )
 
-                verbose = utils.preset.component(
-                    gr.Checkbox,
-                    # tooltip: 'Print tag counts per file, no progress bar',
-                    label='Verbose'
-                )
             # output components
             with gr.Column(variant='panel'):
                 tags = gr.Textbox(
@@ -697,7 +696,6 @@ def on_ui_tabs():
                     replace_tags,
                     ingore_case,
                     sort_by_alphabetical_order,
-                    add_confident_as_weight,
                     replace_underscore,
                     replace_underscore_excludes,
                     escape_tag,
@@ -742,7 +740,7 @@ def on_ui_tabs():
                     replace_tags,
                     ingore_case,
                     sort_by_alphabetical_order,
-                    add_confident_as_weight,
+                    add_confidence_as_weight,
                     replace_underscore,
                     replace_underscore_excludes,
                     escape_tag,
