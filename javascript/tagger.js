@@ -49,8 +49,8 @@ document.addEventListener('DOMContentLoaded', () => {
         waitQuerySelector('#replace-tags'),
 
         // tag-confident labels
-        waitQuerySelector('#rating-confidents'),
-        waitQuerySelector('#tag-confidents')
+        waitQuerySelector('#rating-confidences'),
+        waitQuerySelector('#tag-confidences')
     ]).then(elements => {
 
         const $additionalTags = elements[0];
