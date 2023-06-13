@@ -101,17 +101,17 @@ def on_interrogate(
             continue
 
         abspath = str(path.absolute())
-        key = get_file_interrogator_id(image.tobytes(), interrogator_name)
+        fi_key = get_file_interrogator_id(image.tobytes(), interrogator_name)
 
-        if key in Interrogator.data:
-            if abspath != Interrogator.data[key][0]:
-                if Interrogator.data[key][0] != '':
+        if fi_key in Interrogator.data:
+            if abspath != Interrogator.data[fi_key][0]:
+                if Interrogator.data[fi_key][0] != '':
                     print(f'Dup or rename: Identical checksums for {abspath}\n'
                           'and: {Interrogator.data[key][0]} (path updated)')
-                Interrogator.data[key][0] = abspath
+                Interrogator.data[fi_key][0] = abspath
 
             # this file was already queried for this interrogator.
-            index = Interrogator.data[key][1]
+            index = Interrogator.data[fi_key][1]
             in_db[index] = {
                 "tag": {},
                 "rating": {},
@@ -127,7 +127,7 @@ def on_interrogate(
 
         ratings, tags = interrogator.interrogate(image)
         index = Interrogator.ct
-        Interrogator.data[key] = (abspath, index)
+        Interrogator.data[fi_key] = (abspath, index)
 
         Interrogator.postprocess(ratings, "rating", True)
         (count, txt) = Interrogator.postprocess(tags, "tag", True)
@@ -147,10 +147,10 @@ def on_interrogate(
         json_db.write_text(json_dumps(Interrogator.data))
 
     # collect the weights per file/interrogation of the prior in db stored.
-    for entry in ["tag", "rating"]:
-        for ent, lst in Interrogator.data[entry].items():
+    for key in ["tag", "rating"]:
+        for ent, lst in Interrogator.data[key].items():
             for index, val in filter(lambda x: x[0] in in_db, map(get_i_wt, lst)):
-                in_db[index][entry][ent] = val
+                in_db[index][key][ent] = val
     # process the retrieved from db and add them to the stats
     for index in in_db:
         processed_ct += 1
@@ -192,15 +192,15 @@ def on_interrogate_image(
 
     interrogator: Interrogator = utils.interrogators[interrogator]
 
-    key = get_file_interrogator_id(image.tobytes(), interrogator.name)
-    file_was_already_interrogated = key in Interrogator.data
+    fi_key = get_file_interrogator_id(image.tobytes(), interrogator.name)
+    file_was_already_interrogated = fi_key in Interrogator.data
 
     Interrogator.init_filters(*args)
 
     if file_was_already_interrogated:
         print("already interrogated")
         # this file was already queried for this interrogator.
-        idx = Interrogator.data[key][1]
+        idx = Interrogator.data[fi_key][1]
         tags = {}
         ratings = {}
 
@@ -222,7 +222,7 @@ def on_interrogate_image(
     Interrogator.postprocess(tags, "tag", not file_was_already_interrogated)
     Interrogator.postprocess(ratings, "rating", not file_was_already_interrogated)
     if not file_was_already_interrogated:
-        Interrogator.data[key] = ('', Interrogator.ct)
+        Interrogator.data[fi_key] = ('', Interrogator.ct)
 
     return interrogator.results()
 
@@ -424,10 +424,10 @@ class Interrogator:
 
     @classmethod
     def postprocess(
-        cls, data: Dict[str, float], entry: str, do_store: bool
+        cls, data: Dict[str, float], key: str, do_store: bool
     ) -> Dict[str, float]:
 
-        if entry == "tag":
+        if key == "tag":
             max_ct = cls.count_threshold - len(cls.additional_tags)
         else:
             max_ct = 1000
@@ -442,37 +442,37 @@ class Interrogator:
                 if val <= 0.005:
                     continue
 
-                if ent not in cls.data[entry]:
-                    cls.data[entry][ent] = []
+                if ent not in cls.data[key]:
+                    cls.data[key][ent] = []
 
-                cls.data[entry][ent].append(val + cls.ct)
+                cls.data[key][ent].append(val + cls.ct)
             if processed_ct < max_ct:
-                if entry == "tag":
+                if key == "tag":
                     ent = cls.correct_tag(ent)
                     if cls.is_skipped(ent, val):
                         continue
                     for_json += ", " + ent
                     processed_ct += 1
-                if ent not in cls.filt[entry]:
-                    cls.filt[entry][ent] = 0.0
+                if ent not in cls.filt[key]:
+                    cls.filt[key][ent] = 0.0
 
-                cls.filt[entry][ent] += val
+                cls.filt[key][ent] += val
             elif not do_store:
                 break
-        if entry == "tag":
+        if key == "tag":
             for tag in cls.additional_tags:
-                if tag not in cls.filt[entry]:
-                    cls.filt[entry][tag] = 0.0
-                cls.filt[entry][tag] += 1.0
+                if tag not in cls.filt[key]:
+                    cls.filt[key][tag] = 0.0
+                cls.filt[key][tag] += 1.0
         return (processed_ct, for_json[2:])
 
     @classmethod
     def results(cls, count=1):
         if count > 1:
             # average
-            for entry in cls.filt:
-                for ent in cls.filt[entry]:
-                    cls.filt[entry][ent] /= count
+            for key in cls.filt:
+                for ent in cls.filt[key]:
+                    cls.filt[key][ent] /= count
 
         s = ', '.join(cls.filt["tag"].keys())
         return [s, cls.filt["rating"], cls.filt["tag"], '']
