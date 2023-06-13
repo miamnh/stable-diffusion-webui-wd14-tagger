@@ -6,9 +6,9 @@ from io import BytesIO
 from pathlib import Path
 from glob import glob
 from hashlib import sha256
-from json import dumps as json_dumps, loads as json_loads
+import json
 
-from pandas import read_csv
+from pandas import read_csv, read_json
 from numpy import asarray, float32, expand_dims
 from tqdm import tqdm
 
@@ -79,7 +79,7 @@ def on_interrogate(
     json_db = Interrogator.output_dir_root.joinpath('db.json') if auto_json else None
     if json_db:
         try:
-            data = json_loads(json_db.read_text())
+            data = json.loads(json_db.read_text())
             if "tag" not in data or "rating" not in data or len(data) < 3:
                 raise TypeError
             Interrogator.data = data
@@ -144,7 +144,7 @@ def on_interrogate(
         interrogator.unload()
 
     if json_db and processed_ct > 0:
-        json_db.write_text(json_dumps(Interrogator.data))
+        json_db.write_text(json.dumps(Interrogator.data))
 
     # collect the weights per file/interrogation of the prior in db stored.
     for key in ["tag", "rating"]:
@@ -626,10 +626,47 @@ class WaifuDiffusionInterrogator(Interrogator):
     def download(self) -> Tuple[os.PathLike, os.PathLike]:
         print(f"Loading {self.name} model file from {self.kwargs['repo_id']}")
 
-        model_path = Path(hf_hub_download(
-            **self.kwargs, filename=self.model_path))
-        tags_path = Path(hf_hub_download(
-            **self.kwargs, filename=self.tags_path))
+        mdir = Path(shared.models_path, 'interrogators')
+        model_path = Path(hf_hub_download(**self.kwargs, filename=self.model_path, cache_dir=mdir))
+        tags_path = Path(hf_hub_download(**self.kwargs, filename=self.tags_path, cache_dir=mdir))
+
+        download_model = {
+            'name': self.name,
+            'model_path': str(model_path),
+            'tags_path': str(tags_path),
+        }
+        mpath = Path(mdir, 'model.json')
+
+        if not os.path.exists(mdir):
+            os.makedir(mdir)
+
+        elif os.path.exists(mpath):
+            print(str(mpath))
+            with open(mpath, 'r') as f:
+                try:
+                    data = json.load(f)
+                    data.append(download_model)
+                except Exception as e:
+                    print("download()"+repr(e))
+                    data = [download_model]
+
+        with open(mpath, 'w') as f:
+            json.dump(data, f)
+
+        return model_path, tags_path
+
+    def get_model_path(self) -> Tuple[os.PathLike, os.PathLike]:
+        model_path = ''
+        tags_path = ''
+        mpath = Path(shared.models_path, 'interrogators', 'model.json')
+        try:
+            models = read_json(mpath).to_dict(orient='records')
+            i = next(i for i in models if i['name'] == self.name)
+            model_path = i['model_path']
+            tags_path = i['tags_path']
+        except Exception as e:
+            print("get_model_path():"+repr(e))
+            model_path, tags_path = self.download()
         return model_path, tags_path
 
     def load(self) -> None:
