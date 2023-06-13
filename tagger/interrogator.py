@@ -1,23 +1,20 @@
 import os
-from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
-from math import ceil
-from typing import Tuple, List, Dict
-from io import BytesIO
 from pathlib import Path
+from io import BytesIO
 from glob import glob
 from hashlib import sha256
 import json
-
 from pandas import read_csv, read_json
+from PIL import Image, UnidentifiedImageError
+from typing import Tuple, List, Dict
+from math import ceil
 from numpy import asarray, float32, expand_dims
 from tqdm import tqdm
-
-from PIL import Image, UnidentifiedImageError
+from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
 
 from huggingface_hub import hf_hub_download
-
-from modules import shared
 from modules.deepbooru import re_special as tag_escape_pattern
+from modules import shared
 
 # i'm not sure if it's okay to add this file to the repository
 from tagger import utils, format as tagger_format
@@ -47,7 +44,11 @@ else:
         except ValueError:
             print('--device-id is not a integer')
 
-
+"""
+in db.json cls.data "tag": {tag:[]}, with weights + increment in the list
+similar for the "ratio" dict. The same increment per
+filestamp-interrogation.
+"""
 def get_i_wt(stored: float):
     i = ceil(stored) - 1
     return (i, stored - i)
@@ -83,6 +84,8 @@ def on_interrogate(
             if "tag" not in data or "rating" not in data or len(data) < 3:
                 raise TypeError
             Interrogator.data = data
+            # nr of file-interrogator keys, (not 'tag' or 'rating')
+            Interrogator.ct = len(data) - 2
         except Exception:
             if batch_rewrite:
                 return [None, None, None, 'No database']
@@ -90,6 +93,8 @@ def on_interrogate(
     verbose = getattr(shared.opts, 'tagger_verbose', True)
     in_db = {}
     processed_ct = 0
+    if Interrogator.warn:
+        print(f'Got warnings:\n{Interrogator.warn}\ntags files not written.')
 
     for (path, out_path) in tqdm(Interrogator.iter(), disable=verbose, desc='Tagging'):
         try:
@@ -135,7 +140,7 @@ def on_interrogate(
         if verbose:
             print(f'{path}: {count}/{len(tags)} tags kept')
 
-        if auto_save_tags:
+        if auto_save_tags and Interrogator.warn == '':
             out_path.write_text(txt, encoding='utf-8')
 
         processed_ct += 1
@@ -149,18 +154,19 @@ def on_interrogate(
     # collect the weights per file/interrogation of the prior in db stored.
     for key in ["tag", "rating"]:
         for ent, lst in Interrogator.data[key].items():
-            for index, val in filter(lambda x: x[0] in in_db, map(get_i_wt, lst)):
-                in_db[index][key][ent] = val
+            for i, val in filter(lambda x: x[0] in in_db, map(get_i_wt, lst)):
+                in_db[i][key][ent] = val
     # process the retrieved from db and add them to the stats
     for index in in_db:
+        got = in_db[index]
         processed_ct += 1
-        Interrogator.postprocess(in_db[index]["rating"], "rating", False)
-        (count, txt) = Interrogator.postprocess(in_db[index]["tag"], "tag", False)
+        Interrogator.postprocess(got["rating"], "rating", False)
+        (count, txt) = Interrogator.postprocess(got["tag"], "tag", False)
         if verbose:
-            print(f'{in_db[index]["path"]} (redo): {count}/{len(tags)} tags kept')
+            print(f'{got["path"]} (redo): {count}/{len(tags)} tags kept')
 
-        if auto_save_tags:
-            in_db[index]["out_path"].write_text(txt, encoding='utf-8')
+        if auto_save_tags and Interrogator.warn == '':
+            got["out_path"].write_text(txt, encoding='utf-8')
 
     print('all done :)')
     return interrogator.results(count=processed_ct)
@@ -235,7 +241,7 @@ class Interrogator:
     threshold = 0.35
     count_threshold = 100
     input_glob = ''
-    output_filename_format = ''
+    output_filename_format = '[name].[output_extension]'
     re_flags = IGNORECASE
     additional_tags = []
     exclude_tags = []
@@ -252,7 +258,7 @@ class Interrogator:
     filt = {"tag": {}, "rating": {}}
     paths = []
     all_interrogator_names = {}
-    error = ''
+    warn = ''
 
     @classmethod
     def get_func(cls, tab):
@@ -281,11 +287,10 @@ class Interrogator:
         output_dir.mkdir(0o755, True, True)
         # format output filename
         format_info = tagger_format.Info(path, 'txt')
-        out_filename_fmt = getattr(shared.opts, 'tagger_out_filename_fmt', '')
         try:
             formatted_output_filename = tagger_format.pattern.sub(
                 lambda m: tagger_format.format(m, format_info),
-                out_filename_fmt
+                cls.output_filename_format
             )
         except (TypeError, ValueError) as error:
             print(str(error))
@@ -309,31 +314,8 @@ class Interrogator:
         count_threshold: int,
         sort_by_alphabetical_order=False,
     ):
-        ignore_case = getattr(shared.opts, 'tagger_re_ignore_case', True)
-        cls.re_flags = IGNORECASE if ignore_case else 0
-        cls.sort_by_alphabetical_order = sort_by_alphabetical_order
-        cls.replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
-        cls.tagger_escape = getattr(shared.opts, 'tagger_escape', False)
-
-        cls.additional_tags = split_str(additional_tags)
-        exclude_tags = split_str(exclude_tags)
         search_tags = split_str(search_tags)
         replace_tags = split_str(replace_tags)
-
-        ruxs = getattr(shared.opts, 'tagger_repl_us_excl', '')
-        cls.replace_underscore_excludes = set(split_str(ruxs))
-
-        cls.threshold = threshold
-        cls.count_threshold = count_threshold
-        cls.filt = {"tag": {}, "rating": {}}
-
-        # the first entry can be a regexp, if a string like /.*/
-        if len(exclude_tags) == 1:
-            regexp_str = '^'+exclude_tags[0]+'$'
-            cls.exclude_tags = re_comp(regexp_str, flags=cls.re_flags)
-        else:
-            cls.exclude_tags = set(exclude_tags)
-
         rlen = len(replace_tags)
         if rlen == 1:
             # if we replace only with one, we assume a regexp
@@ -343,9 +325,30 @@ class Interrogator:
         elif len(search_tags) == rlen:
             cls.search_tags = dict((search_tags[i], i) for i in range(rlen))
         else:
-            print("search and replace strings have different counts, ignored")
-            cls.search_tags = {}
-            cls.replace_tags = []
+            cls.warn += 'search, replace: unequal len, replacements > 1.'
+
+        ignore_case = getattr(shared.opts, 'tagger_re_ignore_case', True)
+        cls.re_flags = IGNORECASE if ignore_case else 0
+        cls.sort_by_alphabetical_order = sort_by_alphabetical_order
+        cls.replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
+        cls.tagger_escape = getattr(shared.opts, 'tagger_escape', False)
+
+        cls.additional_tags = split_str(additional_tags)
+        exclude_tags = split_str(exclude_tags)
+
+        ruxs = getattr(shared.opts, 'tagger_repl_us_excl', '')
+        cls.replace_underscore_excludes = set(split_str(ruxs))
+
+        cls.threshold = threshold
+        cls.count_threshold = count_threshold
+        cls.filt = {"tag": {}, "rating": {}}
+
+        # one entry, it is treated as a regexp
+        if len(exclude_tags) == 1:
+            regexp_str = '^'+exclude_tags[0]+'$'
+            cls.exclude_tags = re_comp(regexp_str, flags=cls.re_flags)
+        else:
+            cls.exclude_tags = set(exclude_tags)
 
     @classmethod
     def test_reinit(
@@ -357,8 +360,6 @@ class Interrogator:
         if input_glob == '':
             return 'Input directory is empty'
 
-        filename_fmt = getattr(shared.opts, 'tagger_out_filename_fmt', '')
-        cls.output_filename_format = filename_fmt.strip()
         # if there is no glob pattern, insert it automatically
         if not input_glob.endswith('*'):
             if not input_glob.endswith(os.sep):
@@ -372,6 +373,12 @@ class Interrogator:
             return 'Invalid input directory'
 
         cls.init_filters(*args)
+
+        filename_fmt = getattr(shared.opts, 'tagger_out_filename_fmt', '')
+        if filename_fmt[-12:] == '.[extension]':
+            cls.warn += 'Settings: output format ends with image extension.'
+
+        cls.output_filename_format = filename_fmt.strip()
 
         output_dir = batch_output_dir.strip()
         if not output_dir:
@@ -475,7 +482,7 @@ class Interrogator:
                     cls.filt[key][ent] /= count
 
         s = ', '.join(cls.filt["tag"].keys())
-        return [s, cls.filt["rating"], cls.filt["tag"], '']
+        return [s, cls.filt["rating"], cls.filt["tag"], cls.warn]
 
     def __init__(self, name: str) -> None:
         self._threshold = 0.35

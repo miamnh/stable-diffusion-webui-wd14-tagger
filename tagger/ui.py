@@ -4,7 +4,9 @@ from modules import ui
 from modules import generation_parameters_copypaste as parameters_copypaste
 
 from tagger import utils
-from tagger.interrogator import BATCH_REWRITE_VALUE, on_interrogate_image, on_interrogate, on_interrogate_image_change
+from tagger.interrogator import BATCH_REWRITE_VALUE, on_interrogate_image
+from tagger.interrogator import on_interrogate, on_interrogate_image_change
+from tagger.interrogator import Interrogator as It
 from webui import wrap_gradio_gpu_call
 
 
@@ -79,8 +81,6 @@ def on_ui_tabs():
                         'refresh_preset'
                     )
 
-                # option components
-
                 # interrogator selector
                 with gr.Column():
                     with gr.Row(variant='compact'):
@@ -120,6 +120,7 @@ def on_ui_tabs():
                             label='Additional tags (split by comma)',
                             elem_id='additional-tags'
                         )
+
                         search_tags = utils.preset.component(
                             gr.Textbox,
                             label='Search tags (split by comma)',
