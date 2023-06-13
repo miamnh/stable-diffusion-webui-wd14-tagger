@@ -641,13 +641,12 @@ class WaifuDiffusionInterrogator(Interrogator):
             os.makedir(mdir)
 
         elif os.path.exists(mpath):
-            print(str(mpath))
             with open(mpath, 'r') as f:
                 try:
                     data = json.load(f)
                     data.append(download_model)
                 except Exception as e:
-                    print("download()"+repr(e))
+                    print(f'Adding download_model {mpath} raised {repr(e)}')
                     data = [download_model]
 
         with open(mpath, 'w') as f:
@@ -665,7 +664,7 @@ class WaifuDiffusionInterrogator(Interrogator):
             model_path = i['model_path']
             tags_path = i['tags_path']
         except Exception as e:
-            print("get_model_path():"+repr(e))
+            print(f'{mpath}: requires a name, model_ and tags_path: {repr(e)}')
             model_path, tags_path = self.download()
         return model_path, tags_path
 
