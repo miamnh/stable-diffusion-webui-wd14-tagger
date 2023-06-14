@@ -542,7 +542,10 @@ class DeepDanbooruInterrogator(Interrogator):
         # https://www.tensorflow.org/guide/gpu#limiting_gpu_memory_growth
         # TODO: only run on the first run
         for device in tf.config.experimental.list_physical_devices('GPU'):
-            tf.config.experimental.set_memory_growth(device, True)
+            try:
+                tf.config.experimental.set_memory_growth(device, True)
+            except RuntimeError as e:
+                print(e)
 
         with tf.device(TF_DEVICE_NAME):
             import deepdanbooru.project as ddp
