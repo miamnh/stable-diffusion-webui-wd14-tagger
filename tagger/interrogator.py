@@ -7,7 +7,6 @@ import json
 from pandas import read_csv, read_json
 from PIL import Image
 from typing import Tuple, List, Dict
-from math import ceil
 from numpy import asarray, float32, expand_dims
 from tqdm import tqdm
 from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
@@ -19,6 +18,7 @@ from modules import shared
 # i'm not sure if it's okay to add this file to the repository
 from tagger import utils, format as tagger_format
 from . import dbimutils
+from tagger import interrogation_data as idb
 
 BATCH_REWRITE_VALUE = 'Update tag lists'
 
@@ -45,16 +45,6 @@ else:
             print('--device-id is not a integer')
 
 
-def get_i_wt(stored: float):
-    """
-    in db.json cls.data "tag": {tag:[]}, with weights + increment in the list
-    similar for the "ratio" dict. The same increment per
-    filestamp-interrogation.
-    """
-    i = ceil(stored) - 1
-    return (i, stored - i)
-
-
 def get_file_interrogator_id(bytes, interrogator_name):
     hasher = sha256()
     hasher.update(bytes)
@@ -78,21 +68,18 @@ def on_interrogate(
 
     json_db = getattr(shared.opts, 'tagger_auto_serde_json', True)
     json_db = Interrogator.output_root.joinpath('db.json') if json_db else None
-
-    if json_db:
-        try:
-            data = json.loads(json_db.read_text())
-            if "tag" not in data or "rating" not in data or len(data) < 3:
-                raise TypeError
-            Interrogator.data = data
-            # nr of file-interrogator keys, (not 'tag' or 'rating')
-        except Exception:
-            if batch_rewrite:
-                return [None, None, None, 'No database']
+    try:
+        Interrogator.data = idb.InterrogationDB(json_db)
+    except Exception as e:
+        print(f'error reading {json_db}: {repr(e)}')
+        if batch_rewrite:
+            return [None, None, None, 'No database']
+        if Interrogator.data is None:
+            Interrogator.data = idb.InterrogationDB()
 
     verbose = getattr(shared.opts, 'tagger_verbose', True)
     in_db = {}
-    processed_ct = len(Interrogator.data)
+    processed_ct = Interrogator.data.query_count
     if Interrogator.warn:
         print(f'Got warnings:\n{Interrogator.warn}\ntags files not written.')
 
@@ -110,15 +97,9 @@ def on_interrogate(
         fi_key = get_file_interrogator_id(image.tobytes(), interrogator_name)
 
         if fi_key in Interrogator.data:
-            if abspath != Interrogator.data[fi_key][0]:
-                if Interrogator.data[fi_key][0] != '':
-                    print(f'Dup or rename: Identical checksums for {abspath}\n'
-                          'and: {Interrogator.data[key][0]} (path updated)')
-                Interrogator.data[fi_key][0] = abspath
-
             # this file was already queried for this interrogator.
-            index = Interrogator.data[fi_key][1]
-            in_db[index] = [abspath, out_path, ({}, {})]
+            index = Interrogator.data.get_index(fi_key, abspath)
+            in_db[index] = [abspath, out_path, {}, {}]
 
         elif batch_rewrite:
             # with batch rewrite we only read from database
@@ -130,24 +111,20 @@ def on_interrogate(
             if auto_save_tags and Interrogator.warn == '':
                 out_path.write_text(txt, encoding='utf-8')
 
-    processed_ct = len(Interrogator.data) - processed_ct
+    processed_ct = Interrogator.data.query_count - processed_ct
 
     if unload_model_after_run:
         interrogator.unload()
 
     if json_db and processed_ct > 0:
-        json_db.write_text(json.dumps(Interrogator.data))
+        Interrogator.data.write_json(json_db)
 
     # collect the weights per file/interrogation of the prior in db stored.
-    for index in range(2):
-        key = "tag" if index else "rating"
-        for ent, lst in Interrogator.data[key].items():
-            for i, val in filter(lambda x: x[0] in in_db, map(get_i_wt, lst)):
-                in_db[i][2][index][ent] = val
+    Interrogator.data.collect(in_db)
 
     # process the retrieved from db and add them to the stats
     for got in in_db.values():
-        txt = Interrogator.postprocess(got[2], '', got[0], verbose)
+        txt = Interrogator.postprocess(got[2:], '', got[0], verbose)
 
         if auto_save_tags and Interrogator.warn == '':
             got[1].write_text(txt, encoding='utf-8')
@@ -182,12 +159,16 @@ def on_interrogate_image(
 
     interrogator: Interrogator = utils.interrogators[interrogator]
 
+    # if we just interrogated a batch query, it might be in the db
+    if Interrogator.data is None:
+        Interrogator.data = idb.InterrogationDB()
+
     fi_key = get_file_interrogator_id(image.tobytes(), interrogator.name)
     Interrogator.init_filters(*args)
 
     if fi_key in Interrogator.data:
         # this file was already queried for this interrogator.
-        data = Interrogator.tags_ratings_from_db(fi_key)
+        data = Interrogator.data.get(fi_key)
         fi_key = ""
     else:
         # single process
@@ -221,7 +202,7 @@ class Interrogator:
     image_counter = 0
 
     ct = 0
-    data = {"tag": {}, "rating": {}}
+    data = None
     filt = {"tag": {}, "rating": {}}
     paths = []
     warn = ''
@@ -247,24 +228,6 @@ class Interrogator:
             return None
 
         return (path, output_dir.joinpath(formatted_output_filename))
-
-    @classmethod
-    def tags_ratings_from_db(cls, fi_key):
-        # this file was already queried for this interrogator.
-        idx = cls.data[fi_key][1]
-        tags = {}
-        ratings = {}
-
-        for ent, lst in cls.data["tag"].items():
-            x = next((x for i, x in map(get_i_wt, lst) if i == idx), None)
-            if x is not None:
-                tags[ent] = x
-        for ent, lst in cls.data["rating"].items():
-            x = next((x for i, x in map(get_i_wt, lst) if i == idx), None)
-            if x is not None:
-                ratings[ent] = x
-
-        return (ratings, tags)
 
     @classmethod
     def init_filters(
@@ -355,7 +318,6 @@ class Interrogator:
         # maybe could make checksums per file but then adding or changing
         # file(s) would require a lot of administration
         if not cumulative_mean or input_glob != cls.input_glob:
-            cls.data = {"tag": {}, "rating": {}}
             cls.input_glob = input_glob
             cls.paths = []
             recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
@@ -413,11 +375,8 @@ class Interrogator:
                 if do_store:
                     if val <= 0.005:
                         continue
+                    cls.data.add(i, ent, val)
 
-                    if ent not in cls.data[key]:
-                        cls.data[key][ent] = []
-
-                    cls.data[key][ent].append(val + len(cls.data) - 2)
                 if key == "tag":
                     if count < max_ct:
                         ent = cls.correct_tag(ent)
@@ -441,7 +400,7 @@ class Interrogator:
             print(f'{path}: {count}/{len(lst)} tags kept')
 
         if do_store:
-            Interrogator.data[fi_key] = (path, len(Interrogator.data) - 2)
+            cls.data.story_query(fi_key, path)
 
         return for_json[2:]
 
