@@ -6,7 +6,6 @@ from modules import generation_parameters_copypaste as parameters_copypaste
 from tagger import utils
 from tagger.interrogator import BATCH_REWRITE_VALUE, on_interrogate_image
 from tagger.interrogator import on_interrogate, on_interrogate_image_change
-from tagger.interrogator import Interrogator as It
 from webui import wrap_gradio_gpu_call
 
 
