@@ -392,9 +392,7 @@ class Interrogator:
                 cls.filt[key][ent] += val
 
         for tag in cls.additional_tags:
-            if tag not in cls.filt["tag"]:
-                cls.filt["tag"][tag] = 0.0
-            cls.filt["tag"][tag] += 1.0
+            cls.filt["tag"][tag] = 1.0
 
         if verbose:
             print(f'{path}: {count}/{len(lst)} tags kept')
