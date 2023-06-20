@@ -242,7 +242,7 @@ class Interrogator:
         rlen = len(cls.tags["replace"])
         if rlen == 1:
             # if we replace only with one, we assume a regexp
-            replace_tags = cls.tags["replace"][0]
+            replace_tags = cls.tags["replace"]
             alts = '|'.join(cls.tags["search"])
             return (re_comp('^('+alts+')$', flags=cls.re_flags), replace_tags)
         else:
@@ -356,7 +356,7 @@ class Interrogator:
                 tag = replace[search[tag]]
 
         elif re_match(search, tag):
-            tag = re_sub(search, replace, tag, 1)
+            tag = re_sub(search, replace[0], tag, 1)
 
         return tag
 
