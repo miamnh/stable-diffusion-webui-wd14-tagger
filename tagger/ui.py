@@ -6,6 +6,7 @@ from modules import generation_parameters_copypaste as parameters_copypaste
 from tagger import utils
 from tagger.interrogator import BATCH_REWRITE_VALUE, on_interrogate_image
 from tagger.interrogator import on_interrogate, on_interrogate_image_change
+from tagger.interrogator import Interrogator as It;
 from webui import wrap_gradio_gpu_call
 
 
@@ -114,7 +115,7 @@ def on_ui_tabs():
                             maximum=1,
                             value=0.35
                         )
-                        additional_tags = utils.preset.component(
+                        add_tags = utils.preset.component(
                             gr.Textbox,
                             label='Additional tags (split by comma)',
                             elem_id='additional-tags'
@@ -190,6 +191,11 @@ def on_ui_tabs():
                     elem_id='tag-confidences'
                 )
 
+        add_tags.blur(fn=It.set_add, inputs=[add_tags], outputs=[])
+        exclude_tags.blur(fn=It.set_exclude, inputs=[exclude_tags], outputs=[])
+        search_tags.blur(fn=It.set_search, inputs=[search_tags], outputs=[])
+        replace_tags.blur(fn=It.set_replace, inputs=[replace_tags], outputs=[])
+
         # register events
         selected_preset.change(
             fn=utils.preset.apply,
@@ -210,10 +216,6 @@ def on_ui_tabs():
 
         in1 = [interrogator, unload_model_after_run]
         in2 = [
-            additional_tags,
-            exclude_tags,
-            search_tags,
-            replace_tags,
             threshold,
             count_threshold,
             sort_by_alphabetical_order,

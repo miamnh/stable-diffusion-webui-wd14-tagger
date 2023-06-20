@@ -134,6 +134,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const input_event = new Event('input');
             $selectedTextarea.querySelector('textarea').value = value + tag;
             $selectedTextarea.querySelector('textarea').dispatchEvent(input_event);
+            const input_event2 = new Event('blur');
+            $selectedTextarea.querySelector('textarea').dispatchEvent(input_event2);
 
         }
 

@@ -83,6 +83,8 @@ def on_interrogate(
     if Interrogator.warn:
         print(f'Got warnings:\n{Interrogator.warn}\ntags files not written.')
 
+    rpl = Interrogator.get_search_replace()
+
     iter = filter(None, map(Interrogator.get_paths, Interrogator.paths))
     for (path, out_path) in tqdm(iter, disable=verbose, desc='Tagging'):
         try:
@@ -106,7 +108,7 @@ def on_interrogate(
             print(f'new file {abspath}: requires interrogation (skipped)')
         else:
             data = interrogator.interrogate(image)
-            txt = Interrogator.postprocess(data, fi_key, abspath, verbose)
+            txt = Interrogator.postprocess(data, fi_key, rpl, abspath, verbose)
 
             if auto_save_tags and Interrogator.warn == '':
                 out_path.write_text(txt, encoding='utf-8')
@@ -124,7 +126,7 @@ def on_interrogate(
 
     # process the retrieved from db and add them to the stats
     for got in in_db.values():
-        txt = Interrogator.postprocess(got[2:], '', got[0], verbose)
+        txt = Interrogator.postprocess(got[2:], '', rpl, got[0], verbose)
 
         if auto_save_tags and Interrogator.warn == '':
             got[1].write_text(txt, encoding='utf-8')
@@ -177,7 +179,8 @@ def on_interrogate_image(
         if unload_model_after_run:
             interrogator.unload()
 
-    Interrogator.postprocess(data, fi_key)
+    rpl = Interrogator.get_search_replace()
+    Interrogator.postprocess(data, fi_key, rpl)
     return interrogator.results()
 
 
@@ -191,10 +194,7 @@ class Interrogator:
     input_glob = ''
     output_filename_format = '[name].[output_extension]'
     re_flags = IGNORECASE
-    additional_tags = []
-    exclude_tags = []
-    search_tags = []
-    replace_tags = []
+    tags = {"add": [], "exclude": set(), "search": [], "replace": []}
     replace_underscore_excludes = set()
     rord = True
     replace_underscore = True
@@ -206,6 +206,48 @@ class Interrogator:
     filt = {"tag": {}, "rating": {}}
     paths = []
     warn = ''
+
+    @classmethod
+    def set_add(cls, add_tags):
+        cls.tags["add"] = split_str(add_tags)
+
+    @classmethod
+    def set_exclude(cls, exclude_tags):
+        excl = split_str(exclude_tags)
+        # one entry, it is treated as a regexp
+        if len(excl) == 1:
+            cls.tags["exclude"] = re_comp('^'+excl[0]+'$', flags=cls.re_flags)
+        else:
+            cls.tags["exclude"] = set(excl)
+
+    @classmethod
+    def set_search(cls, search_tags):
+        cls.tags["search"] = split_str(search_tags)
+        return cls.check_search_replace_lengths()
+
+    @classmethod
+    def set_replace(cls, replace_tags):
+        cls.tags["replace"] = split_str(replace_tags)
+        return cls.check_search_replace_lengths()
+
+    @classmethod
+    def check_search_replace_lengths(cls):
+        rlen = len(cls.tags["replace"])
+        if rlen != 1 and rlen != len(cls.tags["search"]):
+            cls.warn = 'search, replace: unequal len, replacements > 1.'
+        return [cls.warn]
+
+    @classmethod
+    def get_search_replace(cls):
+        rlen = len(cls.tags["replace"])
+        if rlen == 1:
+            # if we replace only with one, we assume a regexp
+            replace_tags = cls.tags["replace"][0]
+            alts = '|'.join(cls.tags["search"])
+            return (re_comp('^('+alts+')$', flags=cls.re_flags), replace_tags)
+        else:
+            lookup = dict((cls.tags["search"][i], i) for i in range(rlen))
+            return (lookup, cls.tags["replace"])
 
     @classmethod
     def get_paths(cls, filename):
@@ -232,36 +274,16 @@ class Interrogator:
     @classmethod
     def init_filters(
         cls,
-        additional_tags: str,
-        exclude_tags: str,
-        search_tags: str,
-        replace_tags: str,
 
         threshold: float,
         count_threshold: int,
         sort_by_alphabetical_order=False,
     ):
-        search_tags = split_str(search_tags)
-        replace_tags = split_str(replace_tags)
-        rlen = len(replace_tags)
-        if rlen == 1:
-            # if we replace only with one, we assume a regexp
-            cls.replace_tags = replace_tags[0]
-            alts = '|'.join(search_tags)
-            cls.search_tags = re_comp('^('+alts+')$', flags=cls.re_flags)
-        elif len(search_tags) == rlen:
-            cls.search_tags = dict((search_tags[i], i) for i in range(rlen))
-        else:
-            cls.warn += 'search, replace: unequal len, replacements > 1.'
-
         ignore_case = getattr(shared.opts, 'tagger_re_ignore_case', True)
         cls.re_flags = IGNORECASE if ignore_case else 0
         cls.sort_by_alphabetical_order = sort_by_alphabetical_order
         cls.replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
         cls.tagger_escape = getattr(shared.opts, 'tagger_escape', False)
-
-        cls.additional_tags = split_str(additional_tags)
-        exclude_tags = split_str(exclude_tags)
 
         ruxs = getattr(shared.opts, 'tagger_repl_us_excl', '')
         cls.replace_underscore_excludes = set(split_str(ruxs))
@@ -270,12 +292,6 @@ class Interrogator:
         cls.count_threshold = count_threshold
         cls.filt = {"tag": {}, "rating": {}}
 
-        # one entry, it is treated as a regexp
-        if len(exclude_tags) == 1:
-            regexp_str = '^'+exclude_tags[0]+'$'
-            cls.exclude_tags = re_comp(regexp_str, flags=cls.re_flags)
-        else:
-            cls.exclude_tags = set(exclude_tags)
 
     @classmethod
     def test_reinit(
@@ -328,19 +344,19 @@ class Interrogator:
             print(f'found {len(cls.paths)} image(s)')
 
     @classmethod
-    def correct_tag(cls, tag):
+    def correct_tag(cls, tag, search, replace):
         if tag not in cls.replace_underscore_excludes:
             tag = tag.replace('_', ' ')
 
         if cls.tagger_escape:
             tag = tag_escape_pattern.sub(r'\\\1', tag)
 
-        if len(cls.replace_tags) != 1:
-            if tag in cls.search_tags:
-                tag = cls.replace_tags[cls.search_tags[tag]]
+        if len(replace) != 1:
+            if tag in search:
+                tag = replace[search[tag]]
 
-        elif re_match(cls.search_tags, tag):
-            tag = re_sub(cls.search_tags, cls.replace_tags, tag, 1)
+        elif re_match(search, tag):
+            tag = re_sub(search, replace, tag, 1)
 
         return tag
 
@@ -349,14 +365,14 @@ class Interrogator:
         if val < cls.threshold:
             return True
 
-        if isinstance(cls.exclude_tags, set):
-            return tag in cls.exclude_tags
+        if isinstance(cls.tags["exclude"], set):
+            return tag in cls.tags["exclude"]
 
-        return re_match(cls.exclude_tags, tag)
+        return re_match(cls.tags["exclude"], tag)
 
     @classmethod
     def postprocess(
-        cls, data: (Dict[str, float], Dict[str, float]), fi_key: str,
+        cls, data: (Dict[str, float], Dict[str, float]), fi_key: str, rpl,
         path='', verbose=False
     ) -> Dict[str, float]:
         do_store = fi_key != ''
@@ -365,7 +381,7 @@ class Interrogator:
         rord = not cls.sort_by_alphabetical_order
         for_json = ""
         count = 0
-        max_ct = cls.count_threshold - len(cls.additional_tags)
+        max_ct = cls.count_threshold - len(cls.tags["add"])
 
         for i in range(2):
             lst = sorted(data[i].items(), key=lambda x: x[torv], reverse=rord)
@@ -379,7 +395,7 @@ class Interrogator:
 
                 if key == "tag":
                     if count < max_ct:
-                        ent = cls.correct_tag(ent)
+                        ent = cls.correct_tag(ent, *rpl)
                         if cls.is_skipped(ent, val):
                             continue
                         for_json += ", " + ent
@@ -391,7 +407,7 @@ class Interrogator:
 
                 cls.filt[key][ent] += val
 
-        for tag in cls.additional_tags:
+        for tag in cls.tags["add"]:
             cls.filt["tag"][tag] = 1.0
 
         if verbose:
