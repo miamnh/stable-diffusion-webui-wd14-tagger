@@ -74,6 +74,8 @@ class Interrogator:
     save_tags = True
     query = {}
     pedantic = True
+    cumulative = True
+    output_root = None
 
     @classmethod
     def set_add(cls, add_tags):
@@ -132,108 +134,126 @@ class Interrogator:
         cls.save_tags = save_tags
 
     @classmethod
-    def set_batch_io(cls, input_glob: str, output_dir: str, cumulative: bool):
-        # batch process, make sure directory is the same
-        input_glob = input_glob.strip()
-        if input_glob == '':
-            return ['Input directory is empty']
+    def set_input_glob(cls, input_glob):
+        cls.input_glob = input_glob
 
-        # if there is no glob pattern, insert it automatically
-        if not input_glob.endswith('*'):
-            if not input_glob.endswith(os.sep):
-                input_glob += os.sep
-            input_glob += '*'
-        # get root directory of input glob pattern
-        base_dir = input_glob.replace('?', '*')
-        base_dir = base_dir.split(os.sep + '*').pop(0)
-        if not os.path.isdir(base_dir):
-            return ['Invalid input directory']
+    @classmethod
+    def set_output_dir(cls, output_dir):
+        cls.output_dir = output_dir
 
-        output_dir = output_dir.strip()
-        if not output_dir:
-            output_dir = base_dir
+    @classmethod
+    def set_cumulative(cls, cumulative):
+        cls.cumulative = cumulative
 
-        cls.output_root = Path(output_dir)
-        cls.base_dir_last = Path(base_dir).parts[-1]
+    @classmethod
+    def handle_io_changes(cls):
+        if cls.input_glob != '':
+            input_glob = cls.input_glob.strip()
+            if input_glob == '':
+                return 'Input directory is empty'
 
-        errors = set()
-        # Any change to input directory images should cause a reinit
-        changed_directory = input_glob != cls.input_glob
-        if changed_directory:
+            # if there is no glob pattern, insert it automatically
+            if not input_glob.endswith('*'):
+                if not input_glob.endswith(os.sep):
+                    input_glob += os.sep
+                input_glob += '*'
+            # get root directory of input glob pattern
+            base_dir = input_glob.replace('?', '*')
+            base_dir = base_dir.split(os.sep + '*').pop(0)
+            if not os.path.isdir(base_dir):
+                return 'Invalid input directory'
+
+            if cls.output_dir != '':
+                output_dir = cls.output_dir.strip()
+                if not output_dir:
+                    output_dir = base_dir
+
+                cls.output_root = Path(output_dir)
+            elif not cls.output_root or cls.output_root == Path(cls.base_dir):
+                cls.output_root = Path(base_dir)
+
+            cls.base_dir_last = Path(base_dir).parts[-1]
+            cls.base_dir = base_dir
             cls.json_db = None
             if getattr(shared.opts, 'tagger_auto_serde_json', True):
                 cls.json_db = cls.output_root.joinpath('db.json')
                 try:
                     cls.data = idb.InterrogationDB(cls.json_db)
                 except Exception as e:
-                    errors.add(f'error reading {cls.json_db}: {repr(e)}')
-        if cls.data is None:
-            cls.data = idb.InterrogationDB()
+                    return f'error reading {cls.json_db}: {repr(e)}'
 
-        # maybe could make checksums per file but then adding or changing
-        # file(s) would require a lot of administration
-        if changed_directory or not cumulative:
-            cls.input_glob = input_glob
-            cls.paths = []
-            checked_dirs = set()
             recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
-            for path in glob(input_glob, recursive=recursive):
-                if '.' + path.split('.').pop().lower() in supported_extensions:
-                    path = Path(path)
-                    # guess the output path
-                    base_dir_last_idx = path.parts.index(cls.base_dir_last)
-                    # format output filename
-                    format_info = tagger_format.Info(path, 'txt')
-                    try:
-                        formatted_output_filename = tagger_format.pattern.sub(
-                            lambda m: tagger_format.format(m, format_info),
-                            Its.output_filename_format
-                        )
-                    except (TypeError, ValueError) as error:
-                        errors.add(f"{path}: output format: {str(error)}")
-                        cls.paths.append([path, '', ''])
-                        continue
+            return cls.set_batch_io(glob(input_glob, recursive=recursive))
 
-                    output_dir = cls.output_root.joinpath(
-                        *path.parts[base_dir_last_idx + 1:]).parent
+        if cls.output_dir != '':
+            output_dir = cls.output_dir.strip()
+            if not output_dir:
+                output_dir = cls.base_dir
 
-                    tags_out = output_dir.joinpath(formatted_output_filename)
+            cls.output_root = Path(output_dir)
+            return cls.set_batch_io(map(lambda x: x[0], cls.paths))
+        return ''
 
-                    if output_dir in checked_dirs:
-                        cls.paths.append([path, tags_out, ''])
-                    else:
-                        checked_dirs.add(output_dir)
-                        if os.path.exists(output_dir):
-                            if os.path.isdir(output_dir):
-                                cls.paths.append([path, tags_out, ''])
-                            else:
-                                errors.add(f"{output_dir}: no directory.")
-                                cls.paths.append([path, '', ''])
-                                continue
+    @classmethod
+    def set_batch_io(cls, paths):
+        cls.paths = []
+        checked_dirs = set()
+        for path in paths:
+            if '.' + path.split('.').pop().lower() in supported_extensions:
+                path = Path(path)
+                # guess the output path
+                base_dir_last_idx = path.parts.index(cls.base_dir_last)
+                # format output filename
+                format_info = tagger_format.Info(path, 'txt')
+                try:
+                    formatted_output_filename = tagger_format.pattern.sub(
+                        lambda m: tagger_format.format(m, format_info),
+                        Its.output_filename_format
+                    )
+                except (TypeError, ValueError) as error:
+                    return f"{path}: output format: {str(error)}"
+
+                output_dir = cls.output_root.joinpath(
+                    *path.parts[base_dir_last_idx + 1:]).parent
+
+                tags_out = output_dir.joinpath(formatted_output_filename)
+
+                if output_dir in checked_dirs:
+                    cls.paths.append([path, tags_out, ''])
+                else:
+                    checked_dirs.add(output_dir)
+                    if os.path.exists(output_dir):
+                        if os.path.isdir(output_dir):
+                            cls.paths.append([path, tags_out, ''])
                         else:
-                            cls.paths.append([path, tags_out, output_dir])
+                            return f"{output_dir}: no directory."
+                    else:
+                        cls.paths.append([path, tags_out, output_dir])
 
-            print(f'found {len(cls.paths)} image(s)')
-
-        if len(errors) > 0:
-            print('\n'.join(errors))
-            # could be lenient: query, fix tags output later, and batch update
-            if cls.pedantic:
-                return ['invalid tag output paths, see console']
-        return ['']
+        print(f'found {len(cls.paths)} image(s)')
+        cls.input_glob = ''
+        cls.output_dir = ''
+        return ''
 
     @classmethod
     def init_query(cls, batch=False):
         cls.query["filt"] = {"tag": {}, "rating": {}}
         cls.set_query_search()
         if batch:
+            err = cls.handle_io_changes()
+            if err:
+                return err
+
             cls.query["db"] = {}
             cls.query["ct"] = cls.data.query_count
             if cls.warn:
                 print(f'Warnings:\n{cls.warn}\ntags files not written.')
-        elif cls.data is None:
+            if cls.data and cls.cumulative:
+                return ''
+        if cls.data is None:
             # if we just interrogated a batch query, it might be in the db
             cls.data = idb.InterrogationDB()
+        return ''
 
     @classmethod
     def correct_tag(cls, tag):
@@ -378,7 +398,9 @@ class Interrogator:
 
     def batch_interrogate(self, unload_after: bool, batch_rewrite: bool):
 
-        Interrogator.init_query(True)
+        err = Interrogator.init_query(True)
+        if err:
+            return []
         vb = getattr(shared.opts, 'tagger_verbose', True)
 
         for i in tqdm(range(len(Interrogator.paths)), disable=vb, desc='Tags'):

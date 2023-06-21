@@ -224,9 +224,10 @@ def on_ui_tabs():
                     elem_id='tag-confidences'
                 )
 
-        iodir = [batch_input_glob, batch_output_dir, cumulative_mean]
-        batch_input_glob.blur(fn=It.set_batch_io, inputs=iodir, outputs=[info])
-        batch_output_dir.blur(fn=It.set_batch_io, inputs=iodir, outputs=[info])
+        batch_input_glob.blur(fn=It.set_input_glob, inputs=[batch_input_glob], outputs=[])
+        batch_output_dir.blur(fn=It.set_output_dir, inputs=[batch_output_dir], outputs=[])
+
+        cumulative_mean.input(fn=It.set_cumulative, inputs=[cumulative_mean], outputs=[])
 
         threshold.input(fn=It.set_threshold, inputs=[threshold], outputs=[])
         threshold.release(fn=It.set_threshold, inputs=[threshold], outputs=[])
