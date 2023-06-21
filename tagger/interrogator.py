@@ -16,11 +16,12 @@ from modules.deepbooru import re_special as tag_escape_pattern
 from modules import shared
 
 # i'm not sure if it's okay to add this file to the repository
-from tagger import utils, format as tagger_format
+from tagger import format as tagger_format
 from . import dbimutils
 from tagger import interrogation_data as idb
+from tagger import settings
 
-BATCH_REWRITE_VALUE = 'Update tag lists'
+Its = settings.InterrogatorSettings
 
 # select a device to process
 use_cpu = ('all' in shared.cmd_opts.use_cpu) or (
@@ -51,139 +52,6 @@ def get_file_interrogator_id(bytes, interrogator_name):
     return str(hasher.hexdigest()) + interrogator_name
 
 
-def on_interrogate(
-    button_value: str, interrogator_name: str, unload_model_after_run: bool,
-    auto_save_tags: bool, *args
-):
-    batch_rewrite = button_value == BATCH_REWRITE_VALUE
-
-    if interrogator_name not in utils.interrogators:
-        return [None, None, None, f"'{interrogator_name}': invalid interrogator"]
-
-    interrogator: Interrogator = utils.interrogators[interrogator_name]
-
-    error = Interrogator.test_reinit(*args)
-    if error:
-        return [None, None, None, error]
-
-    json_db = getattr(shared.opts, 'tagger_auto_serde_json', True)
-    json_db = Interrogator.output_root.joinpath('db.json') if json_db else None
-    try:
-        Interrogator.data = idb.InterrogationDB(json_db)
-    except Exception as e:
-        print(f'error reading {json_db}: {repr(e)}')
-        if batch_rewrite:
-            return [None, None, None, 'No database']
-        if Interrogator.data is None:
-            Interrogator.data = idb.InterrogationDB()
-
-    verbose = getattr(shared.opts, 'tagger_verbose', True)
-    in_db = {}
-    processed_ct = Interrogator.data.query_count
-    if Interrogator.warn:
-        print(f'Got warnings:\n{Interrogator.warn}\ntags files not written.')
-
-    rpl = Interrogator.get_search_replace()
-
-    iter = filter(None, map(Interrogator.get_paths, Interrogator.paths))
-    for (path, out_path) in tqdm(iter, disable=verbose, desc='Tagging'):
-        try:
-            image = Image.open(path)
-
-        except Exception as e:
-            # just in case, user has mysterious file...
-            print(f'${path} is not supported image type: {e}')
-            continue
-
-        abspath = str(path.absolute())
-        fi_key = get_file_interrogator_id(image.tobytes(), interrogator_name)
-
-        if fi_key in Interrogator.data:
-            # this file was already queried for this interrogator.
-            index = Interrogator.data.get_index(fi_key, abspath)
-            in_db[index] = [abspath, out_path, {}, {}]
-
-        elif batch_rewrite:
-            # with batch rewrite we only read from database
-            print(f'new file {abspath}: requires interrogation (skipped)')
-        else:
-            data = interrogator.interrogate(image)
-            txt = Interrogator.postprocess(data, fi_key, rpl, abspath, verbose)
-
-            if auto_save_tags and Interrogator.warn == '':
-                out_path.write_text(txt, encoding='utf-8')
-
-    processed_ct = Interrogator.data.query_count - processed_ct
-
-    if unload_model_after_run:
-        interrogator.unload()
-
-    if json_db and processed_ct > 0:
-        Interrogator.data.write_json(json_db)
-
-    # collect the weights per file/interrogation of the prior in db stored.
-    Interrogator.data.collect(in_db)
-
-    # process the retrieved from db and add them to the stats
-    for got in in_db.values():
-        txt = Interrogator.postprocess(got[2:], '', rpl, got[0], verbose)
-
-        if auto_save_tags and Interrogator.warn == '':
-            got[1].write_text(txt, encoding='utf-8')
-
-    print('all done :)')
-    return interrogator.results(count=processed_ct + len(in_db))
-
-
-def on_interrogate_image_change(*args):
-    # FIXME for some reason an image change is triggered twice.
-    # this is a dirty hack to prevent summation/flushing the output.
-    print("interrogator: "+args[1])
-    Interrogator.image_counter += 1
-    if Interrogator.image_counter & 1 == 0:
-        # in db.json ratings can be 2x too high
-        res = Interrogator.results()
-        return res
-    return on_interrogate_image(*args)
-
-
-def on_interrogate_image(
-    image: Image,
-    interrogator: str,
-    unload_model_after_run: bool,
-    *args
-):
-    if image is None:
-        return [None, None, None, 'No image']
-
-    if interrogator not in utils.interrogators:
-        return [None, None, None, f"'{interrogator}': invalid interrogator"]
-
-    interrogator: Interrogator = utils.interrogators[interrogator]
-
-    # if we just interrogated a batch query, it might be in the db
-    if Interrogator.data is None:
-        Interrogator.data = idb.InterrogationDB()
-
-    fi_key = get_file_interrogator_id(image.tobytes(), interrogator.name)
-    Interrogator.init_filters(*args)
-
-    if fi_key in Interrogator.data:
-        # this file was already queried for this interrogator.
-        data = Interrogator.data.get(fi_key)
-        fi_key = ""
-    else:
-        # single process
-        data = interrogator.interrogate(image)
-
-        if unload_model_after_run:
-            interrogator.unload()
-
-    rpl = Interrogator.get_search_replace()
-    Interrogator.postprocess(data, fi_key, rpl)
-    return interrogator.results()
-
-
 def split_str(string: str, separator=',') -> List[str]:
     return [x.strip() for x in string.split(separator) if x]
 
@@ -192,171 +60,197 @@ class Interrogator:
     threshold = 0.35
     count_threshold = 100
     input_glob = ''
-    output_filename_format = '[name].[output_extension]'
-    re_flags = IGNORECASE
-    tags = {"add": [], "exclude": set(), "search": [], "replace": []}
-    replace_underscore_excludes = set()
-    rord = True
-    replace_underscore = True
-    tagger_escape = False
-    image_counter = 0
-
-    ct = 0
+    add = []
+    exclude = set()
+    search = []
+    replace = []
+    base_dir = ''
     data = None
-    filt = {"tag": {}, "rating": {}}
+    json_db = None
     paths = []
     warn = ''
+    image_counter = 0
+    rev = True
+    save_tags = True
+    query = {}
+    pedantic = True
 
     @classmethod
     def set_add(cls, add_tags):
-        cls.tags["add"] = split_str(add_tags)
+        cls.add = split_str(add_tags)
 
     @classmethod
     def set_exclude(cls, exclude_tags):
         excl = split_str(exclude_tags)
         # one entry, it is treated as a regexp
         if len(excl) == 1:
-            cls.tags["exclude"] = re_comp('^'+excl[0]+'$', flags=cls.re_flags)
+            cls.exclude = re_comp('^'+excl[0]+'$', flags=IGNORECASE)
         else:
-            cls.tags["exclude"] = set(excl)
+            cls.exclude = set(excl)
 
     @classmethod
     def set_search(cls, search_tags):
-        cls.tags["search"] = split_str(search_tags)
+        cls.search = split_str(search_tags)
         return cls.check_search_replace_lengths()
 
     @classmethod
     def set_replace(cls, replace_tags):
-        cls.tags["replace"] = split_str(replace_tags)
+        cls.replace = split_str(replace_tags)
         return cls.check_search_replace_lengths()
 
     @classmethod
     def check_search_replace_lengths(cls):
-        rlen = len(cls.tags["replace"])
-        if rlen != 1 and rlen != len(cls.tags["search"]):
+        rlen = len(cls.replace)
+        if rlen != 1 and rlen != len(cls.search):
             cls.warn = 'search, replace: unequal len, replacements > 1.'
         return [cls.warn]
 
     @classmethod
-    def get_search_replace(cls):
-        rlen = len(cls.tags["replace"])
+    def set_query_search(cls):
+        rlen = len(cls.replace)
         if rlen == 1:
             # if we replace only with one, we assume a regexp
-            replace_tags = cls.tags["replace"]
-            alts = '|'.join(cls.tags["search"])
-            return (re_comp('^('+alts+')$', flags=cls.re_flags), replace_tags)
+            alts = '|'.join(cls.search)
+            cls.query["search"] = re_comp('^('+alts+')$', flags=IGNORECASE)
         else:
-            lookup = dict((cls.tags["search"][i], i) for i in range(rlen))
-            return (lookup, cls.tags["replace"])
+            cls.query["search"] = dict((cls.search[i], i) for i in range(rlen))
 
     @classmethod
-    def get_paths(cls, filename):
-        path = Path(filename)
-        # guess the output path
-        base_dir_last_idx = path.parts.index(cls.base_dir_last)
-        output_dir = cls.output_root.joinpath(
-            *path.parts[base_dir_last_idx + 1:]).parent
-
-        output_dir.mkdir(0o755, True, True)
-        # format output filename
-        format_info = tagger_format.Info(path, 'txt')
-        try:
-            formatted_output_filename = tagger_format.pattern.sub(
-                lambda m: tagger_format.format(m, format_info),
-                cls.output_filename_format
-            )
-        except (TypeError, ValueError) as error:
-            print(str(error))
-            return None
-
-        return (path, output_dir.joinpath(formatted_output_filename))
+    def set_threshold(cls, value):
+        cls.threshold = max(0, min(value, 1.0))
 
     @classmethod
-    def init_filters(
-        cls,
-
-        threshold: float,
-        count_threshold: int,
-        sort_by_alphabetical_order=False,
-    ):
-        ignore_case = getattr(shared.opts, 'tagger_re_ignore_case', True)
-        cls.re_flags = IGNORECASE if ignore_case else 0
-        cls.sort_by_alphabetical_order = sort_by_alphabetical_order
-        cls.replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
-        cls.tagger_escape = getattr(shared.opts, 'tagger_escape', False)
-
-        ruxs = getattr(shared.opts, 'tagger_repl_us_excl', '')
-        cls.replace_underscore_excludes = set(split_str(ruxs))
-
-        cls.threshold = threshold
-        cls.count_threshold = count_threshold
-        cls.filt = {"tag": {}, "rating": {}}
-
+    def set_count_threshold(cls, value):
+        cls.count_threshold = max(1, min(value, 500))
 
     @classmethod
-    def test_reinit(
-        cls, input_glob: str, batch_output_dir: str, cumulative_mean: bool,
-        *args
-    ):
+    def set_alphabetical(cls, alphabetical):
+        cls.rev = not alphabetical
+
+    @classmethod
+    def set_save_tags(cls, save_tags):
+        cls.save_tags = save_tags
+
+    @classmethod
+    def set_batch_io(cls, input_glob: str, output_dir: str, cumulative: bool):
         # batch process, make sure directory is the same
         input_glob = input_glob.strip()
         if input_glob == '':
-            return 'Input directory is empty'
+            return ['Input directory is empty']
 
         # if there is no glob pattern, insert it automatically
         if not input_glob.endswith('*'):
             if not input_glob.endswith(os.sep):
                 input_glob += os.sep
             input_glob += '*'
-
         # get root directory of input glob pattern
         base_dir = input_glob.replace('?', '*')
         base_dir = base_dir.split(os.sep + '*').pop(0)
         if not os.path.isdir(base_dir):
-            return 'Invalid input directory'
+            return ['Invalid input directory']
 
-        cls.init_filters(*args)
-
-        filename_fmt = getattr(shared.opts, 'tagger_out_filename_fmt', '')
-        if filename_fmt[-12:] == '.[extension]':
-            cls.warn += 'Settings: output format ends with image extension.'
-
-        cls.output_filename_format = filename_fmt.strip()
-
-        output_dir = batch_output_dir.strip()
+        output_dir = output_dir.strip()
         if not output_dir:
             output_dir = base_dir
 
         cls.output_root = Path(output_dir)
         cls.base_dir_last = Path(base_dir).parts[-1]
 
+        errors = set()
         # Any change to input directory images should cause a reinit
+        changed_directory = input_glob != cls.input_glob
+        if changed_directory:
+            cls.json_db = None
+            if getattr(shared.opts, 'tagger_auto_serde_json', True):
+                cls.json_db = cls.output_root.joinpath('db.json')
+                try:
+                    cls.data = idb.InterrogationDB(cls.json_db)
+                except Exception as e:
+                    errors.add(f'error reading {cls.json_db}: {repr(e)}')
+        if cls.data is None:
+            cls.data = idb.InterrogationDB()
+
         # maybe could make checksums per file but then adding or changing
         # file(s) would require a lot of administration
-        if not cumulative_mean or input_glob != cls.input_glob:
+        if changed_directory or not cumulative:
             cls.input_glob = input_glob
             cls.paths = []
+            checked_dirs = set()
             recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
             for path in glob(input_glob, recursive=recursive):
                 if '.' + path.split('.').pop().lower() in supported_extensions:
-                    cls.paths.append(path)
+                    path = Path(path)
+                    # guess the output path
+                    base_dir_last_idx = path.parts.index(cls.base_dir_last)
+                    # format output filename
+                    format_info = tagger_format.Info(path, 'txt')
+                    try:
+                        formatted_output_filename = tagger_format.pattern.sub(
+                            lambda m: tagger_format.format(m, format_info),
+                            Its.output_filename_format
+                        )
+                    except (TypeError, ValueError) as error:
+                        errors.add(f"{path}: output format: {str(error)}")
+                        cls.paths.append([path, '', ''])
+                        continue
+
+                    output_dir = cls.output_root.joinpath(
+                        *path.parts[base_dir_last_idx + 1:]).parent
+
+                    tags_out = output_dir.joinpath(formatted_output_filename)
+
+                    if output_dir in checked_dirs:
+                        cls.paths.append([path, tags_out, ''])
+                    else:
+                        checked_dirs.add(output_dir)
+                        if os.path.exists(output_dir):
+                            if os.path.isdir(output_dir):
+                                cls.paths.append([path, tags_out, ''])
+                            else:
+                                errors.add(f"{output_dir}: no directory.")
+                                cls.paths.append([path, '', ''])
+                                continue
+                        else:
+                            cls.paths.append([path, tags_out, output_dir])
 
             print(f'found {len(cls.paths)} image(s)')
 
+        if len(errors) > 0:
+            print('\n'.join(errors))
+            # could be lenient: query, fix tags output later, and batch update
+            if cls.pedantic:
+                return ['invalid tag output paths, see console']
+        return ['']
+
     @classmethod
-    def correct_tag(cls, tag, search, replace):
-        if tag not in cls.replace_underscore_excludes:
+    def init_query(cls, batch=False):
+        cls.query["filt"] = {"tag": {}, "rating": {}}
+        cls.set_query_search()
+        if batch:
+            cls.query["db"] = {}
+            cls.query["ct"] = cls.data.query_count
+            if cls.warn:
+                print(f'Warnings:\n{cls.warn}\ntags files not written.')
+        elif cls.data is None:
+            # if we just interrogated a batch query, it might be in the db
+            cls.data = idb.InterrogationDB()
+
+    @classmethod
+    def correct_tag(cls, tag):
+        replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
+        if replace_underscore and tag not in Its.kamojis:
             tag = tag.replace('_', ' ')
 
-        if cls.tagger_escape:
+        if getattr(shared.opts, 'tagger_escape', False):
             tag = tag_escape_pattern.sub(r'\\\1', tag)
 
-        if len(replace) != 1:
+        search = cls.query["search"]
+        if len(cls.replace) != 1:
             if tag in search:
-                tag = replace[search[tag]]
+                tag = cls.replace[search[tag]]
 
         elif re_match(search, tag):
-            tag = re_sub(search, replace[0], tag, 1)
+            tag = re_sub(search, cls.replace[0], tag, 1)
 
         return tag
 
@@ -365,26 +259,22 @@ class Interrogator:
         if val < cls.threshold:
             return True
 
-        if isinstance(cls.tags["exclude"], set):
-            return tag in cls.tags["exclude"]
+        if isinstance(cls.exclude, set):
+            return tag in cls.exclude
 
-        return re_match(cls.tags["exclude"], tag)
+        return re_match(cls.exclude, tag)
 
     @classmethod
-    def postprocess(
-        cls, data: (Dict[str, float], Dict[str, float]), fi_key: str, rpl,
-        path='', verbose=False
-    ) -> Dict[str, float]:
+    def postprocess(cls, data, fi_key: str, path='') -> Dict[str, float]:
         do_store = fi_key != ''
 
-        torv = 0 if cls.sort_by_alphabetical_order else 1
-        rord = not cls.sort_by_alphabetical_order
+        rev = cls.rev
         for_json = ""
         count = 0
-        max_ct = cls.count_threshold - len(cls.tags["add"])
+        max_ct = cls.count_threshold - len(cls.add)
 
         for i in range(2):
-            lst = sorted(data[i].items(), key=lambda x: x[torv], reverse=rord)
+            lst = sorted(data[i+2].items(), key=lambda x: x[rev], reverse=rev)
             key = "tag" if i else "rating"
             # loop with db update
             for ent, val in lst:
@@ -395,43 +285,62 @@ class Interrogator:
 
                 if key == "tag":
                     if count < max_ct:
-                        ent = cls.correct_tag(ent, *rpl)
+                        ent = cls.correct_tag(ent)
                         if cls.is_skipped(ent, val):
                             continue
                         for_json += ", " + ent
                         count += 1
                     elif not do_store:
                         break
-                if ent not in cls.filt[key]:
-                    cls.filt[key][ent] = 0.0
+                if ent not in cls.query["filt"][key]:
+                    cls.query["filt"][key][ent] = 0.0
 
-                cls.filt[key][ent] += val
+                cls.query["filt"][key][ent] += val
 
-        for tag in cls.tags["add"]:
-            cls.filt["tag"][tag] = 1.0
+        for tag in cls.add:
+            cls.query["filt"]["tag"][tag] = 1.0
 
-        if verbose:
-            print(f'{path}: {count}/{len(lst)} tags kept')
+        if getattr(shared.opts, 'tagger_verbose', True):
+            print(f'{data[0]}: {count}/{len(lst)} tags kept')
 
         if do_store:
-            cls.data.story_query(fi_key, path)
+            cls.data.story_query(fi_key, data[0])
 
-        return for_json[2:]
+        if data[1]:
+            data[1].write_text(for_json[2:], encoding='utf-8')
 
     @classmethod
-    def results(cls, count=1):
-        if count > 1:
-            # average
-            for key in cls.filt:
-                for ent in cls.filt[key]:
-                    cls.filt[key][ent] /= count
+    def return_batch(cls):
+        cls.query["ct"] = cls.data.query_count - cls.query["ct"]
 
-        s = ', '.join(cls.filt["tag"].keys())
-        return [s, cls.filt["rating"], cls.filt["tag"], cls.warn]
+        if cls.json_db and cls.query["ct"] > 0:
+            cls.data.write_json(cls.json_db)
+
+        # collect the weights per file/interrogation of the prior in db stored.
+        in_db = cls.query["db"]
+        cls.data.collect(in_db)
+
+        # process the retrieved from db and add them to the stats
+        verbose = getattr(shared.opts, 'tagger_verbose', True)
+        for got in in_db.values():
+            cls.postprocess(got, '', verbose)
+
+        # average
+        count = cls.query["ct"] + len(in_db)
+        for key in cls.query["filt"]:
+            for ent in cls.query["filt"][key]:
+                cls.query["filt"][key][ent] /= count
+
+        print('all done :)')
+        return cls.results()
+
+    @classmethod
+    def results(cls):
+        filt = cls.query["filt"]
+        s = ', '.join(filt["tag"].keys())
+        return [s, filt["rating"], filt["tag"], cls.warn]
 
     def __init__(self, name: str) -> None:
-        self._threshold = 0.35
-        self._tag_count_threshold = 100
         self.name = name
 
     def load(self):
@@ -449,6 +358,63 @@ class Interrogator:
             del self.tags
 
         return unloaded
+
+    def interrogate_image(self, image: Image, unload_after: bool):
+        fi_key = get_file_interrogator_id(image.tobytes(), self.name)
+        Interrogator.init_query()
+
+        if fi_key in Interrogator.data:
+            # this file was already queried for this interrogator.
+            data = Interrogator.data.get(fi_key)
+            fi_key = ""
+        else:
+            # single process
+            data = self.interrogate(image)
+            if unload_after:
+                self.unload()
+
+        Interrogator.postprocess(('', '') + data, fi_key)
+        return Interrogator.results()
+
+    def batch_interrogate(self, unload_after: bool, batch_rewrite: bool):
+
+        Interrogator.init_query(True)
+        vb = getattr(shared.opts, 'tagger_verbose', True)
+
+        for i in tqdm(range(len(Interrogator.paths)), disable=vb, desc='Tags'):
+            # if outputpath is '', no tags file will be written
+            (path, out_path, output_dir) = Interrogator.paths[i]
+            if output_dir:
+                output_dir.mkdir(0o755, True, True)
+                # next iteration we don't need to create the directory
+                Interrogator.paths[i][2] = ''
+
+            try:
+                image = Image.open(path)
+            except Exception as e:
+                # just in case, user has mysterious file...
+                print(f'${path} is not supported image type: {e}')
+                continue
+
+            abspath = str(path.absolute())
+            fi_key = get_file_interrogator_id(image.tobytes(), self.name)
+
+            if fi_key in Interrogator.data:
+                # this file was already queried for this interrogator.
+                index = Interrogator.data.get_index(fi_key, abspath)
+                Interrogator.query["db"][index] = [abspath, out_path, {}, {}]
+
+            elif batch_rewrite:
+                # with batch rewrite we only read from database
+                print(f'new file {abspath}: requires interrogation (skipped)')
+            else:
+                data = (abspath, out_path) + self.interrogate(image)
+                Interrogator.postprocess(data, fi_key)
+
+        if unload_after:
+            self.unload()
+
+        return Interrogator.return_batch()
 
     def interrogate(
         self,

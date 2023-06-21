@@ -1,17 +1,29 @@
 from modules import shared
+from typing import List
+
+# kaomoji from WD 1.4 tagger csv. thanks, Meow-San#5400!
+DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, '
+'3_3, 6_9, >_o, @_@, ^_^, o_o, u_u, x_x, |_|, ||_||'
+
+DEFAULT_OFF = '[name].[output_extension]'
 
 
 def on_ui_settings():
+    Its = InterrogatorSettings
     section = 'tagger', 'Tagger'
     shared.opts.add_option(
         key='tagger_out_filename_fmt',
         info=shared.OptionInfo(
-            '[name].[output_extension]',
+            DEFAULT_OFF,
             label='Tag file output format. Leave blank to use same filename or'
             ' e.g. "[name].[hash:sha1].[output_extension]". Also allowed are '
             '[extension] or any other [hash:<algorithm>] supported by hashlib',
             section=section,
         ),
+    )
+    shared.opts.onchange(
+        key='tagger_out_filename_fmt',
+        func=Its.set_output_filename_format
     )
     shared.opts.add_option(
         key='tagger_batch_recursive',
@@ -49,12 +61,14 @@ def on_ui_settings():
     shared.opts.add_option(
         key='tagger_repl_us_excl',
         info=shared.OptionInfo(
-            # kaomoji from WD 1.4 tagger csv. thanks, Meow-San#5400!
-            '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, 3_3, '
-            '6_9, >_o, @_@, ^_^, o_o, u_u, x_x, |_|, ||_||',
+            DEFAULT_KAMOJIS,
             label='Excudes (split by comma)',
             section=section,
         ),
+    )
+    shared.opts.onchange(
+        key='tagger_repl_us_excl',
+        func=Its.set_us_excl
     )
     shared.opts.add_option(
         key='tagger_escape',
@@ -65,10 +79,33 @@ def on_ui_settings():
         ),
     )
     shared.opts.add_option(
-        key='tagger_re_ignore_case',
+        key='tagger_batch_size',
         info=shared.OptionInfo(
-            True,
-            label='Ignore case in RegExp search/replace',
+            1024,
+            label='batch size for large queries',
             section=section,
         ),
     )
+
+
+def split_str(string: str, separator=',') -> List[str]:
+    return [x.strip() for x in string.split(separator) if x]
+
+
+class InterrogatorSettings:
+    kamojis = set(split_str(DEFAULT_KAMOJIS))
+    output_filename_format = DEFAULT_OFF
+
+    @classmethod
+    def set_us_excl(cls):
+        ruxs = getattr(shared.opts, 'tagger_repl_us_excl', DEFAULT_KAMOJIS)
+        cls.kamojis = set(split_str(ruxs))
+
+    @classmethod
+    def set_output_filename_format(cls):
+        fnfmt = getattr(shared.opts, 'tagger_out_filename_fmt', DEFAULT_OFF)
+        if fnfmt[-12:] == '.[extension]':
+            print("refused to write an image extension")
+            fnfmt = fnfmt[:-12] + '.[output_extension]'
+
+        cls.output_filename_format = fnfmt.strip()

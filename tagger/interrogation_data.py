@@ -75,4 +75,4 @@ class InterrogationDB:
         self.weighed[index][ent].append(val + len(self.query))
 
     def story_query(self, fi_key, path):
-        self.query[fi_key] = (path, len(self.query))
+        self.query[fi_key] = [path, len(self.query)]

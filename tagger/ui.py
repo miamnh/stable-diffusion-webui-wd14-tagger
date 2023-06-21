@@ -1,13 +1,14 @@
 import gradio as gr
+from PIL import Image
 
 from modules import ui
 from modules import generation_parameters_copypaste as parameters_copypaste
 
 from tagger import utils
-from tagger.interrogator import BATCH_REWRITE_VALUE, on_interrogate_image
-from tagger.interrogator import on_interrogate, on_interrogate_image_change
-from tagger.interrogator import Interrogator as It;
+from tagger.interrogator import Interrogator as It
 from webui import wrap_gradio_gpu_call
+
+BATCH_REWRITE = 'Update tag lists'
 
 
 def unload_interrogators():
@@ -18,6 +19,38 @@ def unload_interrogators():
             unloaded_models = unloaded_models + 1
 
     return [f'Successfully unload {unloaded_models} model(s)']
+
+
+def on_interrogate(
+    button: str, name: str, unload_after: bool
+):
+    if name not in utils.interrogators:
+        return [None, None, None, f"'{name}': invalid interrogator"]
+
+    it: It = utils.interrogators[name]
+    return it.batch_interrogate(unload_after, button == BATCH_REWRITE)
+
+
+def on_interrogate_image_change(*args):
+    # FIXME for some reason an image change is triggered twice.
+    # this is a dirty hack to prevent summation/flushing the output.
+    print("interrogator: "+args[1])
+    It.image_counter += 1
+    if It.image_counter & 1 == 0:
+        # in db.json ratings can be 2x too high
+        return It.results()
+    return on_interrogate_image(*args)
+
+
+def on_interrogate_image(image: Image, interrogator: str, unload_after: bool):
+    if image is None:
+        return [None, None, None, 'No image']
+
+    if interrogator not in utils.interrogators:
+        return [None, None, None, f"'{interrogator}': invalid interrogator"]
+
+    interrogator: It = utils.interrogators[interrogator]
+    return interrogator.interrogate_image(image, unload_after)
 
 
 def on_ui_tabs():
@@ -52,7 +85,7 @@ def on_ui_tabs():
                                         'to the same path.'
                         )
 
-                        batch_rewrite = gr.Button(value=BATCH_REWRITE_VALUE)
+                        batch_rewrite = gr.Button(value=BATCH_REWRITE)
 
                         batch_submit = gr.Button(
                             value='Interrogate',
@@ -131,7 +164,7 @@ def on_ui_tabs():
                             label='combine interrogations',
                             value=True
                         )
-                        auto_save_tags = utils.preset.component(
+                        save_tags = utils.preset.component(
                             gr.Checkbox,
                             label='Auto save to tags files',
                             value=True
@@ -140,7 +173,7 @@ def on_ui_tabs():
                         count_threshold = utils.preset.component(
                             gr.Slider,
                             label='Tag count threshold',
-                            minimum=0,
+                            minimum=1,
                             maximum=500,
                             value=50,
                             step=1.0
@@ -182,7 +215,7 @@ def on_ui_tabs():
                     label='Rating confidences',
                     elem_id='rating-confidences'
                 )
-                sort_by_alphabetical_order = utils.preset.component(
+                alphabetical = utils.preset.component(
                     gr.Checkbox,
                     label='Sort by alphabetical order',
                 )
@@ -191,10 +224,22 @@ def on_ui_tabs():
                     elem_id='tag-confidences'
                 )
 
+        iodir = [batch_input_glob, batch_output_dir, cumulative_mean]
+        batch_input_glob.blur(fn=It.set_batch_io, inputs=iodir, outputs=[info])
+        batch_output_dir.blur(fn=It.set_batch_io, inputs=iodir, outputs=[info])
+
+        threshold.input(fn=It.set_threshold, inputs=[threshold], outputs=[])
+        threshold.release(fn=It.set_threshold, inputs=[threshold], outputs=[])
+        count_threshold.input(fn=It.set_count_threshold, inputs=[count_threshold], outputs=[])
+        count_threshold.release(fn=It.set_count_threshold, inputs=[count_threshold], outputs=[])
+
         add_tags.blur(fn=It.set_add, inputs=[add_tags], outputs=[])
         exclude_tags.blur(fn=It.set_exclude, inputs=[exclude_tags], outputs=[])
-        search_tags.blur(fn=It.set_search, inputs=[search_tags], outputs=[])
-        replace_tags.blur(fn=It.set_replace, inputs=[replace_tags], outputs=[])
+        search_tags.blur(fn=It.set_search, inputs=[search_tags], outputs=[info])
+        replace_tags.blur(fn=It.set_replace, inputs=[replace_tags], outputs=[info])
+
+        alphabetical.input(fn=It.set_alphabetical, inputs=[alphabetical], outputs=[])
+        save_tags.input(fn=It.set_save_tags, inputs=[save_tags], outputs=[])
 
         # register events
         selected_preset.change(
@@ -209,40 +254,24 @@ def on_ui_tabs():
             outputs=[info]
         )
 
-        unload_all_models.click(
-            fn=unload_interrogators,
-            outputs=[info]
-        )
-
-        in1 = [interrogator, unload_model_after_run]
-        in2 = [
-            threshold,
-            count_threshold,
-            sort_by_alphabetical_order,
-        ]
-        out = [tags, rating_confidences, tag_confidences, info]
+        unload_all_models.click(fn=unload_interrogators, outputs=[info])
 
         image.change(
             fn=wrap_gradio_gpu_call(on_interrogate_image_change),
-            inputs=[image] + in1 + in2,
-            outputs=out
+            inputs=[image, interrogator, unload_model_after_run],
+            outputs=[tags, rating_confidences, tag_confidences, info]
         )
         image_submit.click(
             fn=wrap_gradio_gpu_call(on_interrogate_image),
-            inputs=[image] + in1 + in2,
-            outputs=out
+            inputs=[image, interrogator, unload_model_after_run],
+            outputs=[tags, rating_confidences, tag_confidences, info]
         )
 
         for button in [batch_rewrite, batch_submit]:
             button.click(
                 fn=wrap_gradio_gpu_call(on_interrogate),
-                inputs=[button] + in1 + [
-                    auto_save_tags,
-                    batch_input_glob,
-                    batch_output_dir,
-                    cumulative_mean,
-                ] + in2,
-                outputs=out
+                inputs=[button, interrogator, unload_model_after_run],
+                outputs=[tags, rating_confidences, tag_confidences, info]
             )
 
     return [(tagger_interface, "Tagger", "tagger")]
