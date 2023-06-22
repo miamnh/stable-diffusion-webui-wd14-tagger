@@ -400,7 +400,7 @@ class Interrogator:
 
         err = Interrogator.init_query(True)
         if err:
-            return []
+            return [None, None, None, err]
         vb = getattr(shared.opts, 'tagger_verbose', True)
 
         for i in tqdm(range(len(Interrogator.paths)), disable=vb, desc='Tags'):
