@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 from io import BytesIO
-from glob import glob
 from hashlib import sha256
 import json
 from pandas import read_csv, read_json
@@ -9,30 +8,20 @@ from PIL import Image
 from typing import Tuple, List, Dict
 from numpy import asarray, float32, expand_dims
 from tqdm import tqdm
-from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
+from packaging import version
 
 from huggingface_hub import hf_hub_download
-from modules.deepbooru import re_special as tag_escape_pattern
 from modules import shared
 
-# i'm not sure if it's okay to add this file to the repository
-from tagger import format as tagger_format
 from . import dbimutils
-from tagger import interrogation_data as idb
 from tagger import settings
+from tagger.uiset import QData, IOData
 
 Its = settings.InterrogatorSettings
 
 # select a device to process
 use_cpu = ('all' in shared.cmd_opts.use_cpu) or (
     'interrogate' in shared.cmd_opts.use_cpu)
-
-# PIL.Image.registered_extensions() returns only PNG if you call early
-supported_extensions = {
-    e
-    for e, f in Image.registered_extensions().items()
-    if f in Image.OPEN
-}
 
 if use_cpu:
     TF_DEVICE_NAME = '/cpu:0'
@@ -57,308 +46,71 @@ def split_str(string: str, separator=',') -> List[str]:
 
 
 class Interrogator:
-    threshold = 0.35
-    count_threshold = 100
-    input_glob = ''
-    add = []
-    exclude = set()
-    search = []
-    replace = []
-    base_dir = ''
-    data = None
-    json_db = None
-    paths = []
-    warn = ''
-    image_counter = 0
-    rev = True
-    save_tags = True
-    query = {}
-    pedantic = True
-    cumulative = True
-    output_root = None
+    # the raw input and output.
+    input = {
+        "alphabetical": False,
+        "cumulative": True,
+        "large_query": False,
+        "unload_after": False,
+        "add": '',
+        "search": '',
+        "replace": '',
+        "paths": '',
+        "exclude": '',
+        "input_glob": '',
+        "output_dir": '',
+    }
+    output = ['', {}, {}, '']
 
     @classmethod
-    def set_add(cls, add_tags):
-        cls.add = split_str(add_tags)
+    def flip(cls, key):
+        def toggle():
+            cls.input[key] = not cls.input[key]
+        return toggle
 
     @classmethod
-    def set_exclude(cls, exclude_tags):
-        excl = split_str(exclude_tags)
-        # one entry, it is treated as a regexp
-        if len(excl) == 1:
-            cls.exclude = re_comp('^'+excl[0]+'$', flags=IGNORECASE)
-        else:
-            cls.exclude = set(excl)
-
-    @classmethod
-    def set_search(cls, search_tags):
-        cls.search = split_str(search_tags)
-        return cls.check_search_replace_lengths()
-
-    @classmethod
-    def set_replace(cls, replace_tags):
-        cls.replace = split_str(replace_tags)
-        return cls.check_search_replace_lengths()
-
-    @classmethod
-    def check_search_replace_lengths(cls):
-        rlen = len(cls.replace)
-        if rlen != 1 and rlen != len(cls.search):
-            cls.warn = 'search, replace: unequal len, replacements > 1.'
-        return [cls.warn]
-
-    @classmethod
-    def set_query_search(cls):
-        rlen = len(cls.replace)
-        if rlen == 1:
-            # if we replace only with one, we assume a regexp
-            alts = '|'.join(cls.search)
-            cls.query["search"] = re_comp('^('+alts+')$', flags=IGNORECASE)
-        else:
-            cls.query["search"] = dict((cls.search[i], i) for i in range(rlen))
-
-    @classmethod
-    def set_threshold(cls, value):
-        cls.threshold = max(0, min(value, 1.0))
-
-    @classmethod
-    def set_count_threshold(cls, value):
-        cls.count_threshold = max(1, min(value, 500))
-
-    @classmethod
-    def set_alphabetical(cls, alphabetical):
-        cls.rev = not alphabetical
-
-    @classmethod
-    def set_save_tags(cls, save_tags):
-        cls.save_tags = save_tags
-
-    @classmethod
-    def set_input_glob(cls, input_glob):
-        cls.input_glob = input_glob
-
-    @classmethod
-    def set_output_dir(cls, output_dir):
-        cls.output_dir = output_dir
-
-    @classmethod
-    def set_cumulative(cls, cumulative):
-        cls.cumulative = cumulative
-
-    @classmethod
-    def handle_io_changes(cls):
-        if cls.input_glob != '':
-            input_glob = cls.input_glob.strip()
-            if input_glob == '':
-                return 'Input directory is empty'
-
-            # if there is no glob pattern, insert it automatically
-            if not input_glob.endswith('*'):
-                if not input_glob.endswith(os.sep):
-                    input_glob += os.sep
-                input_glob += '*'
-            # get root directory of input glob pattern
-            base_dir = input_glob.replace('?', '*')
-            base_dir = base_dir.split(os.sep + '*').pop(0)
-            if not os.path.isdir(base_dir):
-                return 'Invalid input directory'
-
-            if cls.output_dir != '':
-                output_dir = cls.output_dir.strip()
-                if not output_dir:
-                    output_dir = base_dir
-
-                cls.output_root = Path(output_dir)
-            elif not cls.output_root or cls.output_root == Path(cls.base_dir):
-                cls.output_root = Path(base_dir)
-
-            cls.base_dir_last = Path(base_dir).parts[-1]
-            cls.base_dir = base_dir
-            cls.json_db = None
-            if getattr(shared.opts, 'tagger_auto_serde_json', True):
-                cls.json_db = cls.output_root.joinpath('db.json')
-                try:
-                    cls.data = idb.InterrogationDB(cls.json_db)
-                except Exception as e:
-                    return f'error reading {cls.json_db}: {repr(e)}'
-
-            recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
-            return cls.set_batch_io(glob(input_glob, recursive=recursive))
-
-        if cls.output_dir != '':
-            output_dir = cls.output_dir.strip()
-            if not output_dir:
-                output_dir = cls.base_dir
-
-            cls.output_root = Path(output_dir)
-            return cls.set_batch_io(map(lambda x: x[0], cls.paths))
-        return ''
-
-    @classmethod
-    def set_batch_io(cls, paths):
-        cls.paths = []
-        checked_dirs = set()
-        for path in paths:
-            if '.' + path.split('.').pop().lower() in supported_extensions:
-                path = Path(path)
-                # guess the output path
-                base_dir_last_idx = path.parts.index(cls.base_dir_last)
-                # format output filename
-                format_info = tagger_format.Info(path, 'txt')
-                try:
-                    formatted_output_filename = tagger_format.pattern.sub(
-                        lambda m: tagger_format.format(m, format_info),
-                        Its.output_filename_format
-                    )
-                except (TypeError, ValueError) as error:
-                    return f"{path}: output format: {str(error)}"
-
-                output_dir = cls.output_root.joinpath(
-                    *path.parts[base_dir_last_idx + 1:]).parent
-
-                tags_out = output_dir.joinpath(formatted_output_filename)
-
-                if output_dir in checked_dirs:
-                    cls.paths.append([path, tags_out, ''])
+    def set(cls, key: str):
+        def setter(val) -> Tuple[str]:
+            if val != cls.input[key]:
+                cls.input[key] = val
+                if key == 'input_glob' or key == 'output_dir':
+                    err = getattr(IOData, "update_" + key)(val)
                 else:
-                    checked_dirs.add(output_dir)
-                    if os.path.exists(output_dir):
-                        if os.path.isdir(output_dir):
-                            cls.paths.append([path, tags_out, ''])
-                        else:
-                            return f"{output_dir}: no directory."
-                    else:
-                        cls.paths.append([path, tags_out, output_dir])
-
-        print(f'found {len(cls.paths)} image(s)')
-        cls.input_glob = ''
-        cls.output_dir = ''
-        return ''
+                    err = getattr(QData, "update_" + key)(val)
+                if err != '':
+                    Interrogator.warn(err)
+            return [cls.output[3]]
+        return setter
 
     @classmethod
-    def init_query(cls, batch=False):
-        cls.query["filt"] = {"tag": {}, "rating": {}}
-        cls.set_query_search()
-        if batch:
-            err = cls.handle_io_changes()
-            if err:
-                return err
-
-            cls.query["db"] = {}
-            cls.query["ct"] = cls.data.query_count
-            if cls.warn:
-                print(f'Warnings:\n{cls.warn}\ntags files not written.')
-            if cls.data and cls.cumulative:
-                return ''
-        if cls.data is None:
-            # if we just interrogated a batch query, it might be in the db
-            cls.data = idb.InterrogationDB()
-        return ''
+    def warn(cls, err):
+        cls.output[3] += err
 
     @classmethod
-    def correct_tag(cls, tag):
-        replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
-        if replace_underscore and tag not in Its.kamojis:
-            tag = tag.replace('_', ' ')
-
-        if getattr(shared.opts, 'tagger_escape', False):
-            tag = tag_escape_pattern.sub(r'\\\1', tag)
-
-        search = cls.query["search"]
-        if len(cls.replace) != 1:
-            if tag in search:
-                tag = cls.replace[search[tag]]
-
-        elif re_match(search, tag):
-            tag = re_sub(search, cls.replace[0], tag, 1)
-
-        return tag
+    def ok(cls):
+        return cls.output[3] == ''
 
     @classmethod
-    def is_skipped(cls, tag: str, val: float):
-        if val < cls.threshold:
-            return True
-
-        if isinstance(cls.exclude, set):
-            return tag in cls.exclude
-
-        return re_match(cls.exclude, tag)
-
-    @classmethod
-    def postprocess(cls, data, fi_key: str, path='') -> Dict[str, float]:
-        do_store = fi_key != ''
-
-        rev = cls.rev
-        for_json = ""
-        count = 0
-        max_ct = cls.count_threshold - len(cls.add)
-
-        for i in range(2):
-            lst = sorted(data[i+2].items(), key=lambda x: x[rev], reverse=rev)
-            key = "tag" if i else "rating"
-            # loop with db update
-            for ent, val in lst:
-                if do_store:
-                    if val <= 0.005:
-                        continue
-                    cls.data.add(i, ent, val)
-
-                if key == "tag":
-                    if count < max_ct:
-                        ent = cls.correct_tag(ent)
-                        if cls.is_skipped(ent, val):
-                            continue
-                        for_json += ", " + ent
-                        count += 1
-                    elif not do_store:
-                        break
-                if ent not in cls.query["filt"][key]:
-                    cls.query["filt"][key][ent] = 0.0
-
-                cls.query["filt"][key][ent] += val
-
-        for tag in cls.add:
-            cls.query["filt"]["tag"][tag] = 1.0
-
-        if getattr(shared.opts, 'tagger_verbose', True):
-            print(f'{data[0]}: {count}/{len(lst)} tags kept')
-
-        if do_store:
-            cls.data.story_query(fi_key, data[0])
-
-        if data[1]:
-            data[1].write_text(for_json[2:], encoding='utf-8')
+    def err(cls, err=None, interrogate=False):
+        if err is not None:
+            cls.output[3] = err
+        if interrogate:
+            return [None, None, None, cls.output[3]]
+        else:
+            return [cls.output[3]]
 
     @classmethod
-    def return_batch(cls):
-        cls.query["ct"] = cls.data.query_count - cls.query["ct"]
+    def finalize(cls, count):
+        cls.output[0] = ''
+        cls.output[1].clear()
+        cls.output[2].clear()
+        for k, val in QData.tags.items():
+            cls.output[2][k] = val / count
+            cls.output[0] = cls.output[0] + ', ' + k if cls.output[0] else k
 
-        if cls.json_db and cls.query["ct"] > 0:
-            cls.data.write_json(cls.json_db)
-
-        # collect the weights per file/interrogation of the prior in db stored.
-        in_db = cls.query["db"]
-        cls.data.collect(in_db)
-
-        # process the retrieved from db and add them to the stats
-        verbose = getattr(shared.opts, 'tagger_verbose', True)
-        for got in in_db.values():
-            cls.postprocess(got, '', verbose)
-
-        # average
-        count = cls.query["ct"] + len(in_db)
-        for key in cls.query["filt"]:
-            for ent in cls.query["filt"][key]:
-                cls.query["filt"][key][ent] /= count
-
-        print('all done :)')
-        return cls.results()
-
-    @classmethod
-    def results(cls):
-        filt = cls.query["filt"]
-        s = ', '.join(filt["tag"].keys())
-        return [s, filt["rating"], filt["tag"], cls.warn]
+        for ent, val in QData.ratings.items():
+            cls.output[1][ent] = val / count
+        return cls.output
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -379,37 +131,49 @@ class Interrogator:
 
         return unloaded
 
-    def interrogate_image(self, image: Image, unload_after: bool):
+    def interrogate_image(self, image: Image):
         fi_key = get_file_interrogator_id(image.tobytes(), self.name)
-        Interrogator.init_query()
+        QData.init_query()
 
-        if fi_key in Interrogator.data:
+        if fi_key in QData.query:
             # this file was already queried for this interrogator.
-            data = Interrogator.data.get(fi_key)
+            data = QData.query.get(fi_key)
+            # clear: the data does not require storage
             fi_key = ""
         else:
             # single process
             data = self.interrogate(image)
-            if unload_after:
+            if Interrogator.input["unload_after"]:
                 self.unload()
 
-        Interrogator.postprocess(('', '') + data, fi_key)
-        return Interrogator.results()
+        alphabetical = Interrogator.input["alphabetical"]
+        QData.postprocess(['', ''] + data, fi_key, alphabetical)
+        return Interrogator.finalize(1)
 
-    def batch_interrogate(self, unload_after: bool, batch_rewrite: bool):
+    def batch_interrogate(self, batch_rewrite: bool):
+        QData.init_query()
+        in_db = {}
+        ct = len(QData.query)
 
-        err = Interrogator.init_query(True)
-        if err:
-            return [None, None, None, err]
+        if Interrogator.input["large_query"] is True and hasattr(self, "large_batch_interrogate"):
+            # TODO: write specified tags files instead of simple .txt
+            # TODO integrate in database and ui.
+            image_list = [str(x[0].resolve()) for x in IOData.paths]
+            err = self.large_batch_interrogate(image_list, True)
+            if err:
+                Interrogator.warn(err)
+            return Interrogator.finalize(len(image_list))
+
         vb = getattr(shared.opts, 'tagger_verbose', True)
+        alphabetical = Interrogator.input["alphabetical"]
 
-        for i in tqdm(range(len(Interrogator.paths)), disable=vb, desc='Tags'):
+        for i in tqdm(range(len(IOData.paths)), disable=vb, desc='Tags'):
             # if outputpath is '', no tags file will be written
-            (path, out_path, output_dir) = Interrogator.paths[i]
+            (path, out_path, output_dir) = IOData.paths[i]
             if output_dir:
                 output_dir.mkdir(0o755, True, True)
                 # next iteration we don't need to create the directory
-                Interrogator.paths[i][2] = ''
+                IOData.paths[i][2] = ''
 
             try:
                 image = Image.open(path)
@@ -421,22 +185,23 @@ class Interrogator:
             abspath = str(path.absolute())
             fi_key = get_file_interrogator_id(image.tobytes(), self.name)
 
-            if fi_key in Interrogator.data:
+            if fi_key in QData.query:
                 # this file was already queried for this interrogator.
-                index = Interrogator.data.get_index(fi_key, abspath)
-                Interrogator.query["db"][index] = [abspath, out_path, {}, {}]
+                index = QData.get_index(fi_key, abspath)
+                in_db[index] = [abspath, out_path, {}, {}]
 
             elif batch_rewrite:
                 # with batch rewrite we only read from database
                 print(f'new file {abspath}: requires interrogation (skipped)')
             else:
                 data = (abspath, out_path) + self.interrogate(image)
-                Interrogator.postprocess(data, fi_key)
+                QData.postprocess(data, fi_key, alphabetical)
 
-        if unload_after:
+        if Interrogator.input["unload_after"]:
             self.unload()
 
-        return Interrogator.return_batch()
+        ct = QData.finalize_batch(len(QData.query) - ct, in_db, alphabetical)
+        return Interrogator.finalize(ct)
 
     def interrogate(
         self,
@@ -513,7 +278,6 @@ class DeepDanbooruInterrogator(Interrogator):
         # problem, but it can be too complex (like Automatic1111 did). It seems
         # that for now, the best option is to keep the model in memory, as most
         # users use the Waifu Diffusion model with onnx.
-
         return False
 
     def interrogate(
@@ -548,7 +312,10 @@ class DeepDanbooruInterrogator(Interrogator):
         tags = {}
 
         for i, tag in enumerate(self.tags):
-            tags[tag] = confidences[i]
+            if tag[:7] != "rating:":
+                tags[tag] = confidences[i]
+            else:
+                ratings[tag[7:]] = confidences[i]
 
         return ratings, tags
 
@@ -689,3 +456,90 @@ class WaifuDiffusionInterrogator(Interrogator):
         tags = dict(tags[4:].values)
 
         return ratings, tags
+
+    def large_batch_interrogate(self, images_list, dry_run=True) -> str:
+
+        # init model
+        if not hasattr(self, 'model') or self.model is None:
+            self.load()
+
+        os.environ["TF_XLA_FLAGS"] = '--tf_xla_auto_jit=2 --tf_xla_cpu_global_jit'
+        # Reduce logging
+        # os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
+
+        import tensorflow as tf
+
+        from tagger.Generator.TFDataReader import DataGenerator
+
+        # tensorflow maps nearly all vram by default, so we limit this
+        # https://www.tensorflow.org/guide/gpu#limiting_gpu_memory_growth
+        # TODO: only run on the first run
+        gpus = tf.config.experimental.list_physical_devices("GPU")
+        if gpus:
+            for device in gpus:
+                try:
+                    tf.config.experimental.set_memory_growth(device, True)
+                except RuntimeError as e:
+                    print(e)
+
+        if dry_run:  # dry run
+            height, width = 224, 224
+
+            def process_images(filepaths, images):
+                lines = []
+                for image_path in filepaths:
+                    image_path = image_path.numpy().decode("utf-8")
+                    lines.append(f"{image_path}\n")
+                with open("dry_run_read.txt", "a") as f:
+                    f.writelines(lines)
+
+            scheduled = [f"{image_path}\n" for image_path in images_list]
+
+            # Truncate the file from previous runs
+            print("updating dry_run_read.txt")
+            open("dry_run_read.txt", "w").close()
+            with open("dry_run_scheduled.txt", "w") as f:
+                f.writelines(scheduled)
+        else:
+            _, height, width, _ = self.model.inputs[0].shape
+
+            threshold = QData.threshold
+            self.tags["sanitized_name"] = self.tags["name"].map(
+                lambda x: x if x in Its.kaomojis else x.replace("_", " ")
+            )
+
+            @tf.function
+            def pred_model(x):
+                return self.model(x, training=False)
+
+            def process_images(filepaths, images):
+                preds = pred_model(images).numpy()
+
+                for image_path, pred in zip(filepaths, preds):
+                    image_path = image_path.numpy().decode("utf-8")
+
+                    self.tags["preds"] = pred
+                    general_tags = self.tags[self.tags["category"] == 0]
+                    chosen_tags = general_tags[general_tags["preds"] > threshold]
+                    chosen_tags = chosen_tags.sort_values(by="preds", ascending=False)
+                    tags_names = chosen_tags["sanitized_name"]
+
+                    fi_key = image_path.split("/")[-1].split(".")[0] + "_" + self.name
+                    QData.add_tags = tags_names
+                    QData.postprocess((image_path, '', {}, {}), fi_key, False)
+
+                    tags_string = ", ".join(tags_names)
+                    with open(Path(image_path).with_suffix(".txt"), "w") as f:
+                        f.write(tags_string)
+
+        batch_size = getattr(shared.opts, 'tagger_batch_size', 1024)
+        generator = DataGenerator(
+            file_list=images_list, target_height=height, target_width=width, batch_size=batch_size
+        ).genDS()
+
+        orig_add_tags = QData.add_tags
+        for filepaths, images in tqdm(generator):
+            process_images(filepaths, images)
+        QData.add_tag = orig_add_tags
+        del os.environ["TF_XLA_FLAGS"]
+        return ''
