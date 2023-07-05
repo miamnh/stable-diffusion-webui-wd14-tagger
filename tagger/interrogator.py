@@ -59,7 +59,8 @@ class Interrogator:
         "input_glob": '',
         "output_dir": '',
     }
-    output = ['', {}, {}, '']
+    output = None
+    err = ''
 
     @classmethod
     def flip(cls, key):
@@ -77,42 +78,16 @@ class Interrogator:
                 else:
                     err = getattr(QData, "update_" + key)(val)
                 if err != '':
-                    Interrogator.warn(err)
-            return [cls.output[3]]
+                    if cls.err != '':
+                        cls.err += '\n'
+                    cls.err += err
+            return [cls.err]
         return setter
-
-    @classmethod
-    def warn(cls, err):
-        cls.output[3] += err
-
-    @classmethod
-    def ok(cls):
-        return cls.output[3] == ''
-
-    @classmethod
-    def err(cls, err=None, interrogate=False):
-        if err is not None:
-            cls.output[3] = err
-        if interrogate:
-            return [None, None, None, cls.output[3]]
-        else:
-            return [cls.output[3]]
-
-    @classmethod
-    def finalize(cls, count):
-        cls.output[0] = ''
-        cls.output[1].clear()
-        cls.output[2].clear()
-        for k, val in QData.tags.items():
-            cls.output[2][k] = val / count
-            cls.output[0] = cls.output[0] + ', ' + k if cls.output[0] else k
-
-        for ent, val in QData.ratings.items():
-            cls.output[1][ent] = val / count
-        return cls.output
 
     def __init__(self, name: str) -> None:
         self.name = name
+        # run_mode 0 is dry run, 1 means run (alternating), 2 means disabled
+        self.run_mode = 0 if hasattr(self, "large_batch_interrogate") else 2
 
     def load(self):
         raise NotImplementedError()
@@ -147,21 +122,24 @@ class Interrogator:
 
         alphabetical = Interrogator.input["alphabetical"]
         QData.postprocess(['', ''] + data, fi_key, alphabetical)
-        return Interrogator.finalize(1)
+        Interrogator.output = QData.finalize(1)
+        return Interrogator.output
 
     def batch_interrogate(self, batch_rewrite: bool):
         QData.init_query()
         in_db = {}
         ct = len(QData.query)
 
-        if Interrogator.input["large_query"] is True and hasattr(self, "large_batch_interrogate"):
+        if Interrogator.input["large_query"] is True and self.run_mode < 2:
             # TODO: write specified tags files instead of simple .txt
-            # TODO integrate in database and ui.
             image_list = [str(x[0].resolve()) for x in IOData.paths]
-            err = self.large_batch_interrogate(image_list, True)
+            err = self.large_batch_interrogate(image_list, self.run_mode == 0)
             if err:
-                Interrogator.warn(err)
-            return Interrogator.finalize(len(image_list))
+                return [None, None, None, err]
+
+            self.run_mode = (self.run_mode + 1) % 2
+            Interrogator.output = QData.finalize(len(image_list))
+            return Interrogator.output
 
         vb = getattr(shared.opts, 'tagger_verbose', True)
         alphabetical = Interrogator.input["alphabetical"]
@@ -199,8 +177,9 @@ class Interrogator:
         if Interrogator.input["unload_after"]:
             self.unload()
 
-        ct = QData.finalize_batch(len(QData.query) - ct, in_db, alphabetical)
-        return Interrogator.finalize(ct)
+        ct = len(QData.query) - ct
+        Interrogator.output = QData.finalize_batch(in_db, ct, alphabetical)
+        return Interrogator.output
 
     def interrogate(
         self,

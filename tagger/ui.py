@@ -25,31 +25,33 @@ def unload_interrogators():
 
 
 def on_interrogate(button: str, name: str):
-    if not It.ok():
-        return It.err(interrogate=True)
+    if It.err != '':
+        return [None, None, None, It.err]
 
     if name in utils.interrogators:
         it: It = utils.interrogators[name]
         return it.batch_interrogate(button == BATCH_REWRITE)
 
-    return it.err(f"'{name}': invalid interrogator", interrogate=True)
+    return [None, None, None, f"'{name}': invalid interrogator"]
 
 
 def on_interrogate_image(image: Image, interrogator: str):
-    if not It.ok():
-        It.err(interrogate=False)
+    if It.err != '':
+        return [None, None, None, It.err]
 
     if image is None:
-        It.err('No image selected', interrogate=False)
+        return [None, None, None, 'No image selected']
 
-    if interrogator not in utils.interrogators:
-        It.err(f"'{interrogator}': invalid interrogator", interrogate=False)
+    if interrogator in utils.interrogators:
+        interrogator: It = utils.interrogators[interrogator]
+        return interrogator.interrogate_image(image)
 
-    interrogator: It = utils.interrogators[interrogator]
-    return interrogator.interrogate_image(image)
+    return [None, None, None, f"'{interrogator}': invalid interrogator"]
 
 
 def on_tag_search_filter_change(tag_search_filter: str):
+    if It.output is None:
+        return [None, '']
     if len(tag_search_filter) < 2:
         return [It.output[2], '']
     filt = filter(lambda x: tag_search_filter in x[0], It.output[2].items())

@@ -312,7 +312,7 @@ class QData:
             data[1].write_text(for_tags_file[2:], encoding='utf-8')
 
     @classmethod
-    def finalize_batch(cls, ct, in_db, alphabetical: bool) -> int:
+    def finalize_batch(cls, in_db, ct: int, alphabetical: bool) -> int:
         if cls.json_db and ct > 0:
             cls.json_db.write_text(dumps({
                 "tag": cls.weighed[0],
@@ -332,5 +332,16 @@ class QData:
             cls.postprocess(got, '', alphabetical)
 
         # average
+        return cls.finalize(ct + len(in_db))
+
+    @classmethod
+    def finalize(cls, count):
+        output = ['', {}, {}, '']
+        for k, val in cls.tags.items():
+            output[2][k] = val / count
+            output[0] = output[0] + ', ' + k if output[0] else k
+
+        for ent, val in cls.ratings.items():
+            output[1][ent] = val / count
         print('all done :)')
-        return ct + len(in_db)
+        return output
