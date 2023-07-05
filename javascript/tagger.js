@@ -139,7 +139,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         }
 
-        $ratingConfidents.addEventListener('click', onClickLabels)
         $tagConfidents.addEventListener('click', onClickLabels)
 
     }).catch(err => {

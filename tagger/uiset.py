@@ -1,6 +1,6 @@
 """ for handling ui settings """
 
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Callable
 import os
 from pathlib import Path
 from glob import glob
@@ -24,8 +24,17 @@ supported_extensions = {
     if f in Image.OPEN
 }
 
+# interrogator return type
+it_ret_tp = Tuple[
+    str,               # tags as string
+    Dict[str, float],  # rating confidences
+    Dict[str, float],  # tag confidences
+    str,               # error message
+]
+
 
 class IOData:
+    """ data class for input and output paths """
     last_input_glob = None
     base_dir = None
     output_root = None
@@ -33,17 +42,18 @@ class IOData:
     save_tags = True
 
     @classmethod
-    def flip_save_tags(cls):
+    def flip_save_tags(cls) -> callable:
         def toggle():
             cls.save_tags = not cls.save_tags
         return toggle
 
     @classmethod
-    def toggle_save_tags(cls):
+    def toggle_save_tags(cls) -> None:
         cls.save_tags = not cls.save_tags
 
     @classmethod
     def update_output_dir(cls, output_dir: str) -> str:
+        """ update output directory, and set input and output paths """
         pout = Path(output_dir)
         if pout != cls.output_root:
             paths = [x[0] for x in cls.paths]
@@ -55,6 +65,7 @@ class IOData:
 
     @classmethod
     def update_input_glob(cls, input_glob: str) -> str:
+        """ update input glob pattern, and set input and output paths """
         input_glob = input_glob.strip()
         if input_glob == cls.last_input_glob:
             print('input glob did not change')
@@ -98,6 +109,7 @@ class IOData:
 
     @classmethod
     def set_batch_io(cls, paths: List[Path]) -> str:
+        """ set input and output paths for batch mode """
         checked_dirs = set()
         for path in paths:
             ext = os.path.splitext(path)[1].lower()
@@ -143,7 +155,7 @@ class IOData:
         return ''
 
 
-def get_i_wt(stored: float):
+def get_i_wt(stored: float) -> Tuple[int, float]:
     """
     in db.json or InterrogationDB.weighed, with weights + increment in the list
     similar for the "query" dict. Same increment per filestamp-interrogation.
@@ -153,6 +165,7 @@ def get_i_wt(stored: float):
 
 
 class QData:
+    """ Query data: contains parameters for the query """
     add_tags = []
     excl_tags = set()
     rexcl = None
@@ -168,11 +181,14 @@ class QData:
     data = None
     ratings = {}
     tags = {}
+    inverse = False
 
     @classmethod
-    def set(cls, key: str):
+    def set(cls, key: str) -> Callable[[str], Tuple[str]]:
         def setter(val) -> Tuple[str]:
             setattr(cls, key, val)
+            return ('')
+        return setter
 
     @classmethod
     def update_add(cls, add: str) -> str:
@@ -209,6 +225,7 @@ class QData:
 
     @classmethod
     def read_json(cls, outdir) -> str:
+        """ read db.json if it exists """
         cls.json_db = None
         if getattr(shared.opts, 'tagger_auto_serde_json', True):
             cls.json_db = outdir.joinpath('db.json')
@@ -224,7 +241,14 @@ class QData:
         return ''
 
     @classmethod
-    def get_index(cls, fi_key: str, path=''):
+    def move_filter_to_exclude(cls) -> None:
+        """ move filter tags to exclude tags """
+
+        cls.excl_tags.update()
+
+    @classmethod
+    def get_index(cls, fi_key: str, path='') -> int:
+        """ get index for filestamp-interrogator """
         if path and path != cls.query[fi_key][0]:
             if cls.query[fi_key][0] != '':
                 print(f'Dup or rename: Identical checksums for {path}\n'
@@ -235,75 +259,99 @@ class QData:
         return cls.query[fi_key][1]
 
     @classmethod
-    def init_query(cls):
+    def init_query(cls) -> None:
         cls.tags.clear()
         cls.ratings.clear()
 
     @classmethod
-    def correct_tag(cls, tag: str) -> str:
-        replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
-        if replace_underscore and tag not in Its.kamojis:
-            tag = tag.replace('_', ' ')
+    def apply_filters(
+        cls,
+        data,
+        fi_key: str,
+        on_avg: bool,
+    ):
+        """ apply filters to query data, store in db.json if required """
 
-        if getattr(shared.opts, 'tagger_escape', False):
-            tag = tag_escape_pattern.sub(r'\\\1', tag)
-
-        if cls.re_srch:
-            tag = re_sub(cls.re_srch, cls.repl_tags[0], tag, 1)
-        elif tag in cls.srch_tags:
-            tag = cls.repl_tags[cls.srch_tags[tag]]
-
-        return tag
-
-    @classmethod
-    def is_skipped(cls, tag: str, val: float) -> bool:
-        if val < cls.threshold:
-            return True
-
-        return re_match(cls.rexcl, tag) if cls.rexcl else tag in cls.excl_tags
-
-    @classmethod
-    def add(cls, index: int, ent: str, val: float):
-        if ent not in cls.weighed[index]:
-            cls.weighed[index][ent] = []
-
-        cls.weighed[index][ent].append(val + len(cls.query))
-
-    @classmethod
-    def postprocess(cls, data, fi_key: str, alphabetical:bool) -> Dict[str, float]:
-        do_store = fi_key != ''
-
-        rev = not alphabetical
         for_tags_file = ""
+        replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
+
+        tags = sorted(data[3].items(), key=lambda x: x[1], reverse=True)
+        if cls.inverse:
+            # loop with db update
+            for ent, val in tags:
+                if replace_underscore and ent not in Its.kamojis:
+                    ent = ent.replace('_', ' ')
+
+                if getattr(shared.opts, 'tagger_escape', False):
+                    ent = tag_escape_pattern.sub(r'\\\1', ent)
+
+                if cls.re_srch:
+                    ent = re_sub(cls.re_srch, cls.repl_tags[0], ent, 1)
+                elif ent in cls.srch_tags:
+                    ent = cls.repl_tags[cls.srch_tags[ent]]
+                if on_avg or val < cls.threshold:
+                    for_tags_file += ", " + ent
+                elif cls.rexcl and re_match(cls.rexcl, ent):
+                    for_tags_file += ", " + ent
+                elif ent in cls.excl_tags:
+                    for_tags_file += ", " + ent
+                else:
+                    continue
+                cls.tags[ent] = cls.tags[ent] + val if ent in cls.tags else val
+            return
+
+        do_store = fi_key != ''
         count = 0
         max_ct = QData.count_threshold - len(cls.add_tags)
+        ratings = sorted(data[2].items(), key=lambda x: x[1], reverse=True)
+        # loop with db update
+        for ent, val in ratings:
+            if do_store:
+                if ent not in cls.weighed[0]:
+                    cls.weighed[0][ent] = []
 
-        for i in range(2):
-            lst = sorted(data[i+2].items(), key=lambda x: x[rev], reverse=rev)
-            filt = cls.tags if i else cls.ratings
-            # loop with db update
-            for ent, val in lst:
-                if do_store:
-                    if val <= 0.005:
+                cls.weighed[0][ent].append(val + len(cls.query))
+            if ent not in cls.ratings:
+                cls.ratings[ent] = 0.0
+
+            cls.ratings[ent] += val
+
+        # loop with db update
+        for ent, val in tags:
+            if do_store:
+                if val > 0.005:
+                    if ent not in cls.weighed[1]:
+                        cls.weighed[1][ent] = []
+
+                    cls.weighed[1][ent].append(val + len(cls.query))
+
+            if count < max_ct:
+                if replace_underscore and ent not in Its.kamojis:
+                    ent = ent.replace('_', ' ')
+
+                if getattr(shared.opts, 'tagger_escape', False):
+                    ent = tag_escape_pattern.sub(r'\\\1', ent)
+
+                if cls.re_srch:
+                    ent = re_sub(cls.re_srch, cls.repl_tags[0], ent, 1)
+                elif ent in cls.srch_tags:
+                    ent = cls.repl_tags[cls.srch_tags[ent]]
+                if on_avg or val >= cls.threshold:
+                    if cls.rexcl and re_match(cls.rexcl, ent):
                         continue
-                    cls.add(i, ent, val)
-
-                if i == 1:
-                    if count < max_ct:
-                        ent = cls.correct_tag(ent)
-                        if cls.is_skipped(ent, val):
-                            continue
-                        for_tags_file += ", " + ent
-                        count += 1
-                    elif not do_store:
-                        break
-                filt[ent] = filt[ent] + val if ent in filt else val
+                    elif ent in cls.excl_tags:
+                        continue
+                    for_tags_file += ", " + ent
+                    count += 1
+            elif not do_store:
+                break
+            cls.tags[ent] = cls.tags[ent] + val if ent in cls.tags else val
 
         for tag in cls.add_tags:
             cls.tags[tag] = 1.0
 
         if getattr(shared.opts, 'tagger_verbose', True):
-            print(f'{data[0]}: {count}/{len(lst)} tags kept')
+            print(f'{data[0]}: {count}/{len(tags)} tags kept')
 
         if do_store:
             cls.query[fi_key] = [data[0], len(cls.query)]
@@ -312,7 +360,12 @@ class QData:
             data[1].write_text(for_tags_file[2:], encoding='utf-8')
 
     @classmethod
-    def finalize_batch(cls, in_db, ct: int, alphabetical: bool) -> int:
+    def finalize_batch(
+        cls,
+        in_db,
+        ct: int,
+        on_avg: bool
+    ) -> it_ret_tp:
         if cls.json_db and ct > 0:
             cls.json_db.write_text(dumps({
                 "tag": cls.weighed[0],
@@ -329,17 +382,19 @@ class QData:
 
         # process the retrieved from db and add them to the stats
         for got in in_db.values():
-            cls.postprocess(got, '', alphabetical)
+            cls.apply_filters(got, '', on_avg)
 
         # average
-        return cls.finalize(ct + len(in_db))
+        return cls.finalize(ct + len(in_db), on_avg)
 
     @classmethod
-    def finalize(cls, count):
+    def finalize(cls, count: int, on_avg: bool) -> it_ret_tp:
         output = ['', {}, {}, '']
         for k, val in cls.tags.items():
-            output[2][k] = val / count
-            output[0] = output[0] + ', ' + k if output[0] else k
+            weight = val / count
+            if not on_avg or weight >= cls.threshold:
+                output[2][k] = weight
+                output[0] = output[0] + ', ' + k if output[0] else k
 
         for ent, val in cls.ratings.items():
             output[1][ent] = val / count

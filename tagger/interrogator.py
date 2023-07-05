@@ -5,7 +5,7 @@ from hashlib import sha256
 import json
 from pandas import read_csv, read_json
 from PIL import Image
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Callable
 from numpy import asarray, float32, expand_dims
 from tqdm import tqdm
 
@@ -14,7 +14,7 @@ from modules import shared
 
 from . import dbimutils
 from tagger import settings
-from tagger.uiset import QData, IOData
+from tagger.uiset import QData, IOData, it_ret_tp
 
 Its = settings.InterrogatorSettings
 
@@ -47,10 +47,10 @@ def split_str(string: str, separator=',') -> List[str]:
 class Interrogator:
     # the raw input and output.
     input = {
-        "alphabetical": False,
         "cumulative": True,
         "large_query": False,
         "unload_after": False,
+        "threshold_on_average": False,
         "add": '',
         "search": '',
         "replace": '',
@@ -69,7 +69,7 @@ class Interrogator:
         return toggle
 
     @classmethod
-    def set(cls, key: str):
+    def set(cls, key: str) -> Callable[[str], Tuple[str]]:
         def setter(val) -> Tuple[str]:
             if val != cls.input[key]:
                 cls.input[key] = val
@@ -81,7 +81,7 @@ class Interrogator:
                     if cls.err != '':
                         cls.err += '\n'
                     cls.err += err
-            return [cls.err]
+            return (cls.err)
         return setter
 
     def __init__(self, name: str) -> None:
@@ -105,7 +105,7 @@ class Interrogator:
 
         return unloaded
 
-    def interrogate_image(self, image: Image):
+    def interrogate_image(self, image: Image) -> it_ret_tp:
         fi_key = get_file_interrogator_id(image.tobytes(), self.name)
         QData.init_query()
 
@@ -120,12 +120,17 @@ class Interrogator:
             if Interrogator.input["unload_after"]:
                 self.unload()
 
-        alphabetical = Interrogator.input["alphabetical"]
-        QData.postprocess(['', ''] + data, fi_key, alphabetical)
-        Interrogator.output = QData.finalize(1)
+        on_avg = Interrogator.input["threshold_on_average"]
+        QData.apply_filters(['', ''] + data, fi_key, on_avg)
+        to_exclude = False
+        Interrogator.output = QData.finalize(1, on_avg, to_exclude)
         return Interrogator.output
 
-    def batch_interrogate(self, batch_rewrite: bool):
+    def batch_interrogate(
+        self,
+        batch_rewrite: bool,
+        to_exclude=False
+    ) -> it_ret_tp:
         QData.init_query()
         in_db = {}
         ct = len(QData.query)
@@ -142,7 +147,7 @@ class Interrogator:
             return Interrogator.output
 
         vb = getattr(shared.opts, 'tagger_verbose', True)
-        alphabetical = Interrogator.input["alphabetical"]
+        on_avg = Interrogator.input["threshold_on_average"]
 
         for i in tqdm(range(len(IOData.paths)), disable=vb, desc='Tags'):
             # if outputpath is '', no tags file will be written
@@ -172,13 +177,13 @@ class Interrogator:
                 print(f'new file {abspath}: requires interrogation (skipped)')
             else:
                 data = (abspath, out_path) + self.interrogate(image)
-                QData.postprocess(data, fi_key, alphabetical)
+                QData.apply_filters(data, fi_key, on_avg, to_exclude)
 
         if Interrogator.input["unload_after"]:
             self.unload()
 
         ct = len(QData.query) - ct
-        Interrogator.output = QData.finalize_batch(in_db, ct, alphabetical)
+        Interrogator.output = QData.finalize_batch(in_db, ct, on_avg)
         return Interrogator.output
 
     def interrogate(
@@ -504,7 +509,7 @@ class WaifuDiffusionInterrogator(Interrogator):
 
                     fi_key = image_path.split("/")[-1].split(".")[0] + "_" + self.name
                     QData.add_tags = tags_names
-                    QData.postprocess((image_path, '', {}, {}), fi_key, False)
+                    QData.apply_filters((image_path, '', {}, {}), fi_key, False)
 
                     tags_string = ", ".join(tags_names)
                     with open(Path(image_path).with_suffix(".txt"), "w") as f:

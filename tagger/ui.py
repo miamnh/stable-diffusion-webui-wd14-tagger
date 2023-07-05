@@ -1,5 +1,6 @@
 import gradio as gr
 from PIL import Image
+from typing import Dict, Tuple, List
 
 from modules import ui
 from modules import generation_parameters_copypaste as parameters_copypaste
@@ -7,14 +8,14 @@ from modules import generation_parameters_copypaste as parameters_copypaste
 from tagger import utils
 from tagger.interrogator import Interrogator as It
 from webui import wrap_gradio_gpu_call
-from tagger.uiset import IOData, QData
+from tagger.uiset import IOData, QData, it_ret_tp
 from tensorflow import __version__ as tf_version
 from packaging import version
 
 BATCH_REWRITE = 'Update tag lists'
 
 
-def unload_interrogators():
+def unload_interrogators() -> List[str]:
     unloaded_models = 0
 
     for i in utils.interrogators.values():
@@ -24,18 +25,24 @@ def unload_interrogators():
     return [f'Successfully unload {unloaded_models} model(s)']
 
 
-def on_interrogate(button: str, name: str):
+def on_interrogate(button: str, name: str, inverse=False) -> it_ret_tp:
     if It.err != '':
         return [None, None, None, It.err]
 
     if name in utils.interrogators:
         it: It = utils.interrogators[name]
+        QData.inverse = inverse
         return it.batch_interrogate(button == BATCH_REWRITE)
 
     return [None, None, None, f"'{name}': invalid interrogator"]
 
 
-def on_interrogate_image(image: Image, interrogator: str):
+def on_inverse_interrogate(button: str, name: str) -> it_ret_tp:
+    ret = on_interrogate(button, name, True)
+    return (ret[0], ret[2], ret[3])
+
+
+def on_interrogate_image(image: Image, interrogator: str) -> it_ret_tp:
     if It.err != '':
         return [None, None, None, It.err]
 
@@ -49,7 +56,9 @@ def on_interrogate_image(image: Image, interrogator: str):
     return [None, None, None, f"'{interrogator}': invalid interrogator"]
 
 
-def on_tag_search_filter_change(tag_search_filter: str):
+def on_tag_search_filter_change(
+    tag_search_filter: str
+) -> Tuple[Dict[str, float], str]:
     if It.output is None:
         return [None, '']
     if len(tag_search_filter) < 2:
@@ -171,6 +180,12 @@ def on_ui_tabs():
                             label='combine interrogations',
                             value=It.input["cumulative"]
                         )
+                        threshold_on_average = utils.preset.component(
+                            gr.Checkbox,
+                            label='threshold applies on average of all images'
+                            ' and interrogations',
+                            value=It.input["threshold_on_average"]
+                        )
                         save_tags = utils.preset.component(
                             gr.Checkbox,
                             label='Save to tags files',
@@ -197,7 +212,8 @@ def on_ui_tabs():
                         )
                         large_query = utils.preset.component(
                             gr.Checkbox,
-                            label='huge batch query (tensorflow 2.10.0, experimental)',
+                            label='huge batch query (tensorflow 2.10,'
+                            ' experimental)',
                             value=It.input["large_query"],
                             interactive=version.parse(tf_version) ==
                             version.parse('2.10')
@@ -210,50 +226,66 @@ def on_ui_tabs():
 
             # output components
             with gr.Column(variant='panel'):
-                tags = gr.Textbox(
-                    label='Tags',
-                    placeholder='Found tags',
-                    interactive=False,
-                    elem_classes=':link',
-                )
-
-                with gr.Row():
-                    parameters_copypaste.bind_buttons(
-                        parameters_copypaste.create_buttons(
-                            ["txt2img", "img2img"],
-                        ),
-                        None,
-                        tags
-                    )
-
-                rating_confidences = gr.Label(
-                    label='Rating confidences',
-                    elem_id='rating-confidences',
-                )
-                with gr.Row(variant='compact'):
-                    with gr.Column(variant='panel'):
-                        alphabetical = utils.preset.component(
-                            gr.Checkbox,
-                            label='Sort by alphabetical order',
-                            elem_id='tags-alphabetical',
-                            value=It.input["alphabetical"]
+                with gr.Tabs():
+                    tab_ratings_and_included_tags = gr.TabItem(label='Ratings and included tags')
+                    tab_excluded_tags = gr.TabItem(label='Excluded tags')
+                    with tab_ratings_and_included_tags:
+                        tags = gr.Textbox(
+                            label='Tags',
+                            placeholder='Found tags',
+                            interactive=False,
+                            elem_classes=':link',
                         )
-                    with gr.Column(variant='panel'):
-                        tag_search_filter = utils.preset.component(
-                            gr.Textbox,
-                            label='filter tags in list (not in tags file)',
-                            elem_id='tag-search-filter'
 
+                        with gr.Row():
+                            parameters_copypaste.bind_buttons(
+                                parameters_copypaste.create_buttons(
+                                    ["txt2img", "img2img"],
+                                ),
+                                None,
+                                tags
+                            )
+
+                        rating_confidences = gr.Label(
+                            label='Rating confidences',
+                            elem_id='rating-confidences',
                         )
-                tag_confidences = gr.Label(
-                    label='Tag confidences',
-                    elem_id='tag-confidences',
-                )
+                        with gr.Row(variant='compact'):
+                            tag_search_filter = utils.preset.component(
+                                gr.Textbox,
+                                label='search tags in lists, regex or comma split',
+                                elem_id='tag-search-filter'
+                            )
+                        tag_confidences = gr.Label(
+                            label='Tag confidences',
+                            elem_id='tag-confidences',
+                        )
+                    with tab_excluded_tags:
+                        excluded_tags = gr.Textbox(
+                            label='Tags',
+                            placeholder='Discarding tags',
+                            interactive=False,
+                            elem_classes=':link',
+                        )
+                        excluded_tag_confidences = gr.Label(
+                            label='Excluded Tag confidences',
+                            elem_id='tag-confidences',
+                        )
+
+        tab_ratings_and_included_tags.select(fn=wrap_gradio_gpu_call(on_interrogate),
+                                 inputs=[batch_rewrite, interrogator],
+                                 outputs=[tags, rating_confidences,
+                                          tag_confidences, info])
+
+        tab_excluded_tags.select(fn=wrap_gradio_gpu_call(on_inverse_interrogate),
+                                 inputs=[batch_rewrite, interrogator],
+                                 outputs=[excluded_tags,
+                                          excluded_tag_confidences, info])
 
         cumulative.input(fn=It.flip('cumulative'), inputs=[], outputs=[])
         large_query.input(fn=It.flip('large_query'), inputs=[], outputs=[])
         unload_after.input(fn=It.flip('unload_after'), inputs=[], outputs=[])
-        alphabetical.input(fn=It.flip('alphabetical'), inputs=[], outputs=[])
+        threshold_on_average.input(fn=It.flip('threshold_on_average'), inputs=[], outputs=[])
 
         save_tags.input(fn=IOData.flip_save_tags(), inputs=[], outputs=[])
         input_glob.blur(fn=It.set("input_glob"), inputs=[input_glob],
