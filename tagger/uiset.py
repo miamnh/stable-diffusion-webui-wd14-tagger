@@ -167,6 +167,7 @@ def get_i_wt(stored: float) -> Tuple[int, float]:
 class QData:
     """ Query data: contains parameters for the query """
     add_tags = []
+    keep_tags = set()
     excl_tags = set()
     rexcl = None
     srch_tags = {}
@@ -189,6 +190,11 @@ class QData:
             setattr(cls, key, val)
             return ('')
         return setter
+
+    @classmethod
+    def update_keep(cls, keep: str) -> str:
+        cls.keep_tags = set(map(lambda x: x.strip(), keep.split(',')))
+        return ''
 
     @classmethod
     def update_add(cls, add: str) -> str:
@@ -264,6 +270,11 @@ class QData:
         cls.ratings.clear()
 
     @classmethod
+    def is_excluded(cls, ent: str) -> bool:
+        """ check if tag is excluded """
+        return cls.rexcl.match(ent) if cls.rexcl else ent in cls.excl_tags
+
+    @classmethod
     def apply_filters(
         cls,
         data,
@@ -272,12 +283,11 @@ class QData:
     ):
         """ apply filters to query data, store in db.json if required """
 
-        for_tags_file = ""
         replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
 
         tags = sorted(data[3].items(), key=lambda x: x[1], reverse=True)
         if cls.inverse:
-            # loop with db update
+            # inverse: display all tags marked for exclusion
             for ent, val in tags:
                 if replace_underscore and ent not in Its.kamojis:
                     ent = ent.replace('_', ' ')
@@ -289,22 +299,21 @@ class QData:
                     ent = re_sub(cls.re_srch, cls.repl_tags[0], ent, 1)
                 elif ent in cls.srch_tags:
                     ent = cls.repl_tags[cls.srch_tags[ent]]
-                if on_avg or val < cls.threshold:
-                    for_tags_file += ", " + ent
-                elif cls.rexcl and re_match(cls.rexcl, ent):
-                    for_tags_file += ", " + ent
-                elif ent in cls.excl_tags:
-                    for_tags_file += ", " + ent
-                else:
+                if ent in cls.keep_tags:
                     continue
-                cls.tags[ent] = cls.tags[ent] + val if ent in cls.tags else val
+                if on_avg or cls.is_excluded(ent) or val < cls.threshold:
+                    if ent not in cls.tags:
+                        cls.tags[ent] = 0.0
+                    cls.tags[ent] += val
             return
 
+        # not inverse: display all tags marked for inclusion
+        for_tags_file = ""
         do_store = fi_key != ''
         count = 0
         max_ct = QData.count_threshold - len(cls.add_tags)
         ratings = sorted(data[2].items(), key=lambda x: x[1], reverse=True)
-        # loop with db update
+        # loop over ratings
         for ent, val in ratings:
             if do_store:
                 if ent not in cls.weighed[0]:
@@ -316,7 +325,7 @@ class QData:
 
             cls.ratings[ent] += val
 
-        # loop with db update
+        # loop over tags with db update
         for ent, val in tags:
             if do_store:
                 if val > 0.005:
@@ -336,13 +345,11 @@ class QData:
                     ent = re_sub(cls.re_srch, cls.repl_tags[0], ent, 1)
                 elif ent in cls.srch_tags:
                     ent = cls.repl_tags[cls.srch_tags[ent]]
-                if on_avg or val >= cls.threshold:
-                    if cls.rexcl and re_match(cls.rexcl, ent):
+                if ent not in cls.keep_tags:
+                    if cls.is_excluded(ent) or on_avg and val < cls.threshold:
                         continue
-                    elif ent in cls.excl_tags:
-                        continue
-                    for_tags_file += ", " + ent
-                    count += 1
+                for_tags_file += ", " + ent
+                count += 1
             elif not do_store:
                 break
             cls.tags[ent] = cls.tags[ent] + val if ent in cls.tags else val
@@ -366,6 +373,7 @@ class QData:
         ct: int,
         on_avg: bool
     ) -> it_ret_tp:
+        """ finalize the batch query """
         if cls.json_db and ct > 0:
             cls.json_db.write_text(dumps({
                 "tag": cls.weighed[0],
@@ -389,14 +397,30 @@ class QData:
 
     @classmethod
     def finalize(cls, count: int, on_avg: bool) -> it_ret_tp:
+        """ finalize the query, return the results """
         output = ['', {}, {}, '']
-        for k, val in cls.tags.items():
-            weight = val / count
-            if not on_avg or weight >= cls.threshold:
-                output[2][k] = weight
-                output[0] = output[0] + ', ' + k if output[0] else k
+
+        def averager(x):
+            return x[0], x[1] / count
+
+        if on_avg:
+            if cls.inverse:
+                def inverse_filt(x):
+                    return cls.is_excluded(x[0]) or x[1] < cls.threshold
+                iter = filter(inverse_filt, map(averager, cls.tags.items()))
+            else:
+                def filt(x):
+                    return not cls.is_excluded(x[0]) and x[1] >= cls.threshold
+                iter = filter(filt,  map(averager, cls.tags.items()))
+        else:
+            iter = map(averager, cls.tags.items())
+
+        for k, already_averaged_val in iter:
+            output[2][k] = already_averaged_val
+            output[0] = output[0] + ', ' + k if output[0] else k
 
         for ent, val in cls.ratings.items():
             output[1][ent] = val / count
+
         print('all done :)')
         return output

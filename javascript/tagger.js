@@ -43,7 +43,7 @@ function waitQuerySelector(selector, timeout = 5000, $rootElement = gradioApp())
 document.addEventListener('DOMContentLoaded', () => {
     Promise.all([
         // option texts
-        waitQuerySelector('#additional-tags'),
+        waitQuerySelector('#keep-tags'),
         waitQuerySelector('#exclude-tags'),
         waitQuerySelector('#search-tags'),
         waitQuerySelector('#replace-tags'),
@@ -53,14 +53,14 @@ document.addEventListener('DOMContentLoaded', () => {
         waitQuerySelector('#tag-confidences')
     ]).then(elements => {
 
-        const $additionalTags = elements[0];
+        const $keepTags = elements[0];
         const $excludeTags = elements[1];
         const $searchTags = elements[2];
         const $replaceTags = elements[3];
         const $ratingConfidents = elements[4];
         const $tagConfidents = elements[5];
 
-        let $selectedTextarea = $additionalTags;
+        let $selectedTextarea = $keepTags;
 
         /**
          * @this {HTMLElement}
@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
             $selectedTextarea = this;
         }
 
-        $additionalTags.addEventListener('click', onClickTextarea);
+        $keepTags.addEventListener('click', onClickTextarea);
         $excludeTags.addEventListener('click', onClickTextarea);
         $searchTags.addEventListener('click', onClickTextarea);
         $replaceTags.addEventListener('click', onClickTextarea);
@@ -105,13 +105,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 // when clicking on athe dotted line, insert in either the exclude or replace list
                 // when not clicking on the dotted line, insert in the additingal or search list
-                if ($selectedTextarea == $additionalTags) {
+                if ($selectedTextarea == $keepTags) {
                     $selectedTextarea = $excludeTags;
                 } else if ($selectedTextarea == $searchTags) {
                     $selectedTextarea = $replaceTags;
                 }
             } else if ($selectedTextarea == $excludeTags) {
-                $selectedTextarea = $additionalTags;
+                $selectedTextarea = $keepTags;
             } else if ($selectedTextarea == $replaceTags) {
                 $selectedTextarea = $searchTags;
             }

@@ -155,6 +155,11 @@ def on_ui_tabs():
                     unload_all_models = gr.Button(
                         value='Unload all interrogate models'
                     )
+                add_tags = utils.preset.component(
+                    gr.Textbox,
+                    label='Additional tags (comma split)',
+                    elem_id='additional-tags'
+                )
                 with gr.Row(variant='compact'):
                     with gr.Column(variant='compact'):
                         threshold = utils.preset.component(
@@ -164,15 +169,14 @@ def on_ui_tabs():
                             maximum=1,
                             value=QData.threshold
                         )
-                        add_tags = utils.preset.component(
+                        keep_tags = utils.preset.component(
                             gr.Textbox,
-                            label='Additional tags (split by comma)',
-                            elem_id='additional-tags'
+                            label='Keep tags regardless of thresholds (comma split)',
+                            elem_id='keep-tags'
                         )
-
                         search_tags = utils.preset.component(
                             gr.Textbox,
-                            label='Search tags (split by comma)',
+                            label='Search tags (comma split)',
                             elem_id='search-tags'
                         )
                         cumulative = utils.preset.component(
@@ -202,12 +206,12 @@ def on_ui_tabs():
                         )
                         exclude_tags = utils.preset.component(
                             gr.Textbox,
-                            label='Exclude tags (split by comma)',
+                            label='Exclude tags (regardless, comma split)',
                             elem_id='exclude-tags'
                         )
                         replace_tags = utils.preset.component(
                             gr.Textbox,
-                            label='Replacement tags (split by comma)',
+                            label='Replacement tags (comma split)',
                             elem_id='replace-tags'
                         )
                         large_query = utils.preset.component(
@@ -304,6 +308,7 @@ def on_ui_tabs():
                                 inputs=[count_threshold], outputs=[])
 
         add_tags.blur(fn=It.set('add'), inputs=[add_tags], outputs=[info])
+        keep_tags.blur(fn=It.set('keep'), inputs=[keep_tags], outputs=[info])
         exclude_tags.blur(fn=It.set('exclude'), inputs=[exclude_tags],
                           outputs=[info])
         search_tags.blur(fn=It.set('search'), inputs=[search_tags],
