@@ -43,7 +43,7 @@ class Preset:
             **self.default_values.get(path, {})
         })
 
-        setattr(component, 'path', path)
+        component.path = path
 
         self.components.append(component)
         return component

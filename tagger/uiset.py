@@ -10,8 +10,9 @@ from json import dumps, loads
 from PIL import Image
 from modules import shared
 from modules.deepbooru import re_special as tag_escape_pattern
+from functools import partial
 
-from tagger import format as tagger_format
+from tagger import format as tags_format
 
 from tagger import settings
 Its = settings.InterrogatorSettings
@@ -45,7 +46,7 @@ class IOData:
     def update_output_dir(cls, output_dir: str) -> str:
         pout = Path(output_dir)
         if pout != cls.output_root:
-            paths = list(map(lambda x: x[0], cls.paths))
+            paths = [x[0] for x in cls.paths]
             cls.paths = []
             cls.output_root = pout
             err = cls.set_batch_io(paths)
@@ -109,10 +110,13 @@ class IOData:
                 # guess the output path
                 base_dir_last_idx = path.parts.index(cls.base_dir_last)
                 # format output filename
-                format_info = tagger_format.Info(path, 'txt')
+
+                info = tags_format.Info(path, 'txt')
+                fm = partial(lambda info, m: tags_format.parse(m, info), info)
+
                 try:
-                    formatted_output_filename = tagger_format.pattern.sub(
-                        lambda m: tagger_format.format(m, format_info),
+                    formatted_output_filename = tags_format.pattern.sub(
+                        fm,
                         Its.output_filename_format
                     )
                 except (TypeError, ValueError) as error:
@@ -172,7 +176,7 @@ class QData:
 
     @classmethod
     def update_add(cls, add: str) -> str:
-        cls.add_tags = list(map(lambda x: x.strip(), add.split(',')))
+        cls.add_tags = [x.strip() for x in add.split(',')]
         return ''
 
     @classmethod
@@ -186,7 +190,7 @@ class QData:
 
     @classmethod
     def update_search(cls, search: str) -> str:
-        srch_map = map(lambda x: x.strip(), search.split(','))
+        srch_map = [x.strip() for x in search.split(',')]
         cls.srch_tags = dict(enumerate(srch_map))
         slen = len(cls.srch_tags)
         if slen == 1:
@@ -198,7 +202,7 @@ class QData:
 
     @classmethod
     def update_replace(cls, replace: str) -> str:
-        repl_tag_map = map(lambda x: x.strip(), replace.split(','))
+        repl_tag_map = [x.strip() for x in replace.split(',')]
         cls.repl_tags = list(repl_tag_map)
         if cls.re_srch is None and len(cls.srch_tags) != len(cls.repl_tags):
             return 'search, replace: unequal len, replacements > 1.'

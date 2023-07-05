@@ -10,17 +10,16 @@ class Info(NamedTuple):
     output_ext: str
 
 
-def hash(i: Info, algo='sha1') -> str:
+def hashfun(i: Info, algo='sha1') -> str:
     try:
-        hash = hashlib.new(algo)
-    except ImportError:
-        raise ValueError(f"'{algo}' is invalid hash algorithm")
+        hasher = hashlib.new(algo)
+    except ImportError as err:
+        raise ValueError(f"'{algo}' is invalid hash algorithm") from err
 
-    # TODO: is okay to hash large image?
     with open(i.path, 'rb') as file:
-        hash.update(file.read())
+        hasher.update(file.read())
 
-    return hash.hexdigest()
+    return hasher.hexdigest()
 
 
 pattern = re.compile(r'\[([\w:]+)\]')
@@ -30,13 +29,13 @@ pattern = re.compile(r'\[([\w:]+)\]')
 available_formats: Dict[str, Callable] = {
     'name': lambda i: i.path.stem,
     'extension': lambda i: i.path.suffix[1:],
-    'hash': hash,
+    'hash': hashfun,
 
     'output_extension': lambda i: i.output_ext
 }
 
 
-def format(match: re.Match, info: Info) -> str:
+def parse(match: re.Match, info: Info) -> str:
     matches = match[1].split(':')
     name, args = matches[0], matches[1:]
 

@@ -195,7 +195,7 @@ def on_ui_tabs():
                         )
                         large_query = utils.preset.component(
                             gr.Checkbox,
-                            label='huge batch query (tensorflow 2.10.0)',
+                            label='huge batch query (tensorflow 2.10.0, experimental)',
                             value=It.input["large_query"],
                             interactive=version.parse(tf_version) ==
                             version.parse('2.10')

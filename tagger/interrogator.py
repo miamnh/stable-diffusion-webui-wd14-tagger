@@ -8,7 +8,6 @@ from PIL import Image
 from typing import Tuple, List, Dict
 from numpy import asarray, float32, expand_dims
 from tqdm import tqdm
-from packaging import version
 
 from huggingface_hub import hf_hub_download
 from modules import shared
