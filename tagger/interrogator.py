@@ -107,7 +107,8 @@ class Interrogator:
 
     def interrogate_image(self, image: Image) -> it_ret_tp:
         fi_key = get_file_interrogator_id(image.tobytes(), self.name)
-        QData.init_query()
+        if not Interrogator.input["cumulative"]:
+            QData.init_query()
 
         if fi_key in QData.query:
             # this file was already queried for this interrogator.
