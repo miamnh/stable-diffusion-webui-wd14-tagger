@@ -29,7 +29,7 @@ def check_for_errors(name) -> str:
     if name not in utils.interrogators:
         return f"'{name}': invalid interrogator"
 
-    if len(QData.srch_tags) != len(QData.repl_tags):
+    if len(QData.search_tags) != len(QData.replace_tags):
         return 'search, replace: unequal len, replacements > 1.'
 
     return ''
@@ -284,22 +284,25 @@ def on_ui_tabs():
 
             # output components
             with gr.Column(variant='panel'):
-
+                with gr.Row(variant='compact'):
+                    with gr.Column(variant='compact'):
+                        move_filter_to_keep = gr.Button(
+                            value='Move visible tags to keep tags',
+                            variant='secondary'
+                        )
+                        move_filter_to_exclude = gr.Button(
+                            value='Move visible tags to exclude tags',
+                            variant='secondary'
+                        )
+                    with gr.Column(variant='compact'):
+                        tag_search_selection = utils.preset.component(
+                            gr.Textbox,
+                            label='string search selected tags'
+                        )
                 with gr.Tabs():
                     tab_include = gr.TabItem(label='Ratings and included tags')
                     tab_discard = gr.TabItem(label='Excluded tags')
                     with tab_include:
-                        with gr.Row(variant='compact'):
-                            with gr.Column(variant='compact'):
-                                move_filter_to_exclude = gr.Button(
-                                    value='Move visible tags to exclude tags',
-                                    variant='secondary'
-                                )
-                            with gr.Column(variant='compact'):
-                                tag_search_selected = utils.preset.component(
-                                    gr.Textbox,
-                                    label='string search selected tags'
-                                )
                         # clickable tags to populate excluded tags
                         tags = gr.HTML(
                             label='Tags',
@@ -323,18 +326,6 @@ def on_ui_tabs():
                             elem_id='tag-confidences',
                         )
                     with tab_discard:
-                        with gr.Row(variant='compact'):
-                            with gr.Column(variant='compact'):
-                                move_filter_to_keep = gr.Button(
-                                    value='Move visible tags to keep tags',
-                                    variant='secondary'
-                                )
-                            with gr.Column(variant='compact'):
-                                tag_search_excluded = utils.preset.component(
-                                    gr.Textbox,
-                                    label='string search excluded tags'
-                                )
-
                         # clickable tags to populate keep tags
                         discarded_tags = gr.HTML(
                             label='Tags',
@@ -357,14 +348,14 @@ def on_ui_tabs():
 
         move_filter_to_keep.click(
             fn=wrap_gradio_gpu_call(move_filter_to_keep_fn),
-            inputs=[tag_search_excluded, interrogator],
-            outputs=[tag_search_excluded, keep_tags, discarded_tags,
+            inputs=[tag_search_selection, interrogator],
+            outputs=[tag_search_selection, keep_tags, discarded_tags,
                      excluded_tag_confidences, info])
 
         move_filter_to_exclude.click(
             fn=wrap_gradio_gpu_call(move_filter_to_exclude_fn),
-            inputs=[tag_search_selected, interrogator],
-            outputs=[tag_search_selected, exclude_tags, tags,
+            inputs=[tag_search_selection, interrogator],
+            outputs=[tag_search_selection, exclude_tags, tags,
                      rating_confidences, tag_confidences, info])
 
         cumulative.input(fn=wrap_gradio_gpu_call(It.flip('cumulative')),
@@ -411,27 +402,22 @@ def on_ui_tabs():
                           inputs=[replace_tags], outputs=[replace_tags, info])
 
         # register events
-        tag_search_selected.change(
+        tag_search_selection.change(
             fn=wrap_gradio_gpu_call(on_tag_search_filter_change),
-            inputs=[tag_search_selected],
-            outputs=[tags, tag_confidences, info])
+            inputs=[tag_search_selection],
+            outputs=[
+                discarded_tags if QData.inverse else tags,
+                excluded_tag_confidences if QData.inverse else tag_confidences,
+                info])
 
         # register events
-        tag_search_selected.blur(
+        tag_search_selection.blur(
             fn=wrap_gradio_gpu_call(on_tag_search_filter_change),
-            inputs=[tag_search_selected],
-            outputs=[tags, tag_confidences, info])
-
-        tag_search_excluded.change(
-            fn=wrap_gradio_gpu_call(on_tag_search_filter_change),
-            inputs=[tag_search_excluded],
-            outputs=[discarded_tags, excluded_tag_confidences, info])
-
-        # register events
-        tag_search_excluded.blur(
-            fn=wrap_gradio_gpu_call(on_tag_search_filter_change),
-            inputs=[tag_search_excluded],
-            outputs=[discarded_tags, excluded_tag_confidences, info])
+            inputs=[tag_search_selection],
+            outputs=[
+                discarded_tags if QData.inverse else tags,
+                excluded_tag_confidences if QData.inverse else tag_confidences,
+                info])
 
         # register events
         selected_preset.change(

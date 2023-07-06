@@ -64,6 +64,10 @@ def refresh_interrogators() -> List[str]:
             'wd-v1-4-moat-tagger-v2',
             repo_id='SmilingWolf/wd-v1-4-moat-tagger-v2'
         ),
+        'wd-v1-4-convnextv2-tagger-v2': WaifuDiffusionInterrogator(
+            'wd-v1-4-convnextv2-tagger-v2',
+            repo_id='SmilingWolf/SW-CV-ModelZoo'
+        ),
     }
 
     # load deepdanbooru project
@@ -77,16 +81,21 @@ def refresh_interrogators() -> List[str]:
     )
 
     for path in os.scandir(shared.cmd_opts.deepdanbooru_projects_path):
+        print(f"Scanning {path} as deepdanbooru project")
         if not path.is_dir():
+            print(f"Warning: {path} is not a directory, skipped")
             continue
 
         if not Path(path, 'project.json').is_file():
+            print(f"Warning: {path} has no project.json, skipped")
             continue
 
         interrogators[path.name] = DeepDanbooruInterrogator(path.name, path)
     # scan for onnx models as well
     for path in os.scandir(shared.cmd_opts.onnxtagger_path):
+        print(f"Scanning {path} as onnx model")
         if not path.is_dir():
+            print(f"Warning: {path} is not a directory, skipped")
             continue
 
         onnx_files = [x for x in os.scandir(path) if x.name.endswith('.onnx')]
@@ -106,7 +115,11 @@ def refresh_interrogators() -> List[str]:
         csv.sort(key=tag_select_csvs_up_front)
         tags_path = Path(path, csv[0])
 
-        interrogators[path.name] = WaifuDiffusionInterrogator(path.name, model_path=model_path, tags_path=tags_path)
+        if path.name not in interrogators:
+            raise NotImplementedError("Add model to interrogators dict in tagger/utils.py")
+
+        interrogators[path.name].model_path = model_path
+        interrogators[path.name].tags_path = tags_path
 
     return sorted(interrogators.keys())
 

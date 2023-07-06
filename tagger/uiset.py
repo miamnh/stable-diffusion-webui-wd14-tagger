@@ -168,11 +168,11 @@ class QData:
     """ Query data: contains parameters for the query """
     add_tags = []
     keep_tags = set()
-    excl_tags = set()
+    exclude_tags = set()
     rexcl = None
-    srch_tags = {}
-    repl_tags = []
-    re_srch = None
+    search_tags = {}
+    replace_tags = []
+    re_search = None
     threshold = 0.35
     count_threshold = 100
 
@@ -203,33 +203,32 @@ class QData:
 
     @classmethod
     def update_exclude(cls, exclude: str) -> str:
+        exclude = exclude.strip()
         # first filter empty strings
         if ',' in exclude:
             filtered = [x for x in map(str.strip, exclude.split(',')) if x != '']
-            cls.excl_tags = set(filtered)
+            cls.exclude_tags = set(filtered)
             cls.rexcl = None
-        else:
-            exclude = exclude.strip()
-            print(f'exclude: ^{exclude}$')
+        elif exclude != '':
             cls.rexcl = re_comp('^'+exclude+'$', flags=IGNORECASE)
         return ''
 
     @classmethod
     def update_search(cls, search: str) -> str:
-        srch = [x for x in map(str.strip, search.split(',')) if x != '']
-        cls.srch_tags = dict(enumerate(srch))
-        slen = len(cls.srch_tags)
-        if len(cls.srch_tags) == 1:
-            cls.re_srch = re_comp('^'+srch[0]+'$', flags=IGNORECASE)
-        elif slen != len(cls.repl_tags):
+        search = [x for x in map(str.strip, search.split(',')) if x != '']
+        cls.search_tags = dict(enumerate(search))
+        slen = len(cls.search_tags)
+        if len(cls.search_tags) == 1:
+            cls.re_search = re_comp('^'+search[0]+'$', flags=IGNORECASE)
+        elif slen != len(cls.replace_tags):
             return 'search, replace: unequal len, replacements > 1.'
         return ''
 
     @classmethod
     def update_replace(cls, replace: str) -> str:
         repl_tag_map = [x for x in map(str.strip, replace.split(',')) if x != '']
-        cls.repl_tags = list(repl_tag_map)
-        if cls.re_srch is None and len(cls.srch_tags) != len(cls.repl_tags):
+        cls.replace_tags = list(repl_tag_map)
+        if cls.re_search is None and len(cls.search_tags) != len(cls.replace_tags):
             return 'search, replace: unequal len, replacements > 1.'
 
     @classmethod
@@ -239,16 +238,15 @@ class QData:
         if getattr(shared.opts, 'tagger_auto_serde_json', True):
             cls.json_db = outdir.joinpath('db.json')
             if cls.json_db.is_file():
-                fixme = {"excl": "exclude", "srch": "search", "repl": "replace"}
                 try:
                     data = loads(cls.json_db.read_text())
                     if any(x not in data for x in ["tag", "rating", "query"]):
                         raise TypeError
                 except Exception as err:
                     return f'Error reading {cls.json_db}: {repr(err)}'
-                for key in ["add", "keep", "excl", "srch", "repl"]:
+                for key in ["add", "keep", "exclude", "search", "replace"]:
                     if key in data:
-                        err = getattr(cls, f"update_{fixme[key]}")(data[key])
+                        err = getattr(cls, f"update_{key}")(data[key])
                         if err:
                             return err
                 cls.weighed = (data["tag"], data["rating"])
@@ -259,16 +257,16 @@ class QData:
     def write_json(cls) -> None:
         """ write db.json """
         if cls.json_db is not None:
-            srch = sorted(cls.srch_tags.items(), key=lambda x: x[0])
+            search = sorted(cls.search_tags.items(), key=lambda x: x[0])
             data = {
                 "tag": cls.weighed[0],
                 "rating": cls.weighed[1],
                 "query": cls.query,
                 "add": ','.join(cls.add_tags),
                 "keep": ','.join(cls.keep_tags),
-                "excl": ','.join(cls.excl_tags),
-                "srch": ','.join([x[1] for x in srch]),
-                "repl": ','.join(cls.repl_tags)
+                "exclude": ','.join(cls.exclude_tags),
+                "search": ','.join([x[1] for x in search]),
+                "repl": ','.join(cls.replace_tags)
             }
             cls.json_db.write_text(dumps(data, indent=2))
 
@@ -276,7 +274,7 @@ class QData:
     def move_filter_to_exclude(cls) -> None:
         """ move filter tags to exclude tags """
 
-        cls.excl_tags.update()
+        cls.exclude_tags.update()
 
     @classmethod
     def get_index(cls, fi_key: str, path='') -> int:
@@ -312,7 +310,7 @@ class QData:
     @classmethod
     def is_excluded(cls, ent: str) -> bool:
         """ check if tag is excluded """
-        return re_match(cls.rexcl, ent) if cls.rexcl else ent in cls.excl_tags
+        return re_match(cls.rexcl, ent) if cls.rexcl else ent in cls.exclude_tags
 
     @classmethod
     def apply_filters(
@@ -335,10 +333,10 @@ class QData:
                 if getattr(shared.opts, 'tagger_escape', False):
                     ent = tag_escape_pattern.sub(r'\\\1', ent)
 
-                if cls.re_srch:
-                    ent = re_sub(cls.re_srch, cls.repl_tags[0], ent, 1)
-                elif ent in cls.srch_tags:
-                    ent = cls.repl_tags[cls.srch_tags[ent]]
+                if cls.re_search:
+                    ent = re_sub(cls.re_search, cls.replace_tags[0], ent, 1)
+                elif ent in cls.search_tags:
+                    ent = cls.replace_tags[cls.search_tags[ent]]
 
                 if ent in cls.keep_tags or ent in cls.add_tags:
                     continue
@@ -382,10 +380,10 @@ class QData:
                 if getattr(shared.opts, 'tagger_escape', False):
                     ent = tag_escape_pattern.sub(r'\\\1', ent)
 
-                if cls.re_srch:
-                    ent = re_sub(cls.re_srch, cls.repl_tags[0], ent, 1)
-                elif ent in cls.srch_tags:
-                    ent = cls.repl_tags[cls.srch_tags[ent]]
+                if cls.re_search:
+                    ent = re_sub(cls.re_search, cls.replace_tags[0], ent, 1)
+                elif ent in cls.search_tags:
+                    ent = cls.replace_tags[cls.search_tags[ent]]
                 if ent not in cls.keep_tags:
                     if cls.is_excluded(ent):
                         continue
