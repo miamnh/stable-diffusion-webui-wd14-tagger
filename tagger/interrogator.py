@@ -361,11 +361,11 @@ class WaifuDiffusionInterrogator(Interrogator):
         return model_path, tags_path
 
     def load(self) -> None:
-        if hasattr(self, 'model_path') and hasattr(self, 'tags_path'):
+        if isinstance(self.model_path, str) or isinstance(self.tags_path, str):
+            model_path, tags_path = self.download()
+        else:
             model_path = self.model_path
             tags_path = self.tags_path
-        else:
-            model_path, tags_path = self.download()
 
         # only one of these packages should be installed a time in any one env
         # https://onnxruntime.ai/docs/get-started/with-python.html#install-onnx-runtime
@@ -387,10 +387,8 @@ class WaifuDiffusionInterrogator(Interrogator):
         if use_cpu:
             providers.pop(0)
 
+        print(f'Loading {self.name} model from {model_path}, {tags_path}')
         self.model = InferenceSession(str(model_path), providers=providers)
-
-        print(f'Loaded {self.name} model from {model_path}, {tags_path}')
-
         self.tags = read_csv(tags_path)
 
     def interrogate(

@@ -68,10 +68,7 @@ def refresh_interrogators() -> List[str]:
             'wd-v1-4-convnextv2-tagger-v2',
             repo_id='SmilingWolf/SW-CV-ModelZoo'
         ),
-        'Z3D-E621-Convnext': WaifuDiffusionInterrogator(
-            'Z3D-E621-Convnext'
-        ),
-
+        'Z3D-E621-Convnext': WaifuDiffusionInterrogator('Z3D-E621-Convnext'),
     }
 
     # load deepdanbooru project
