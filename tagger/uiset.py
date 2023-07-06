@@ -449,7 +449,7 @@ class QData:
             if cls.inverse:
                 def inverse_filt(x):
                     return cls.is_excluded(x[0]) or x[1] < cls.threshold and \
-                           not x[0] in cls.keep_tags
+                           x[0] not in cls.keep_tags
                 iter = filter(inverse_filt, map(averager, cls.tags.items()))
             else:
                 def filt(x):
