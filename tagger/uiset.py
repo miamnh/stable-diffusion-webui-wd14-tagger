@@ -239,6 +239,7 @@ class QData:
         if getattr(shared.opts, 'tagger_auto_serde_json', True):
             cls.json_db = outdir.joinpath('db.json')
             if cls.json_db.is_file():
+                fixme = {"excl": "exclude", "srch": "search", "repl": "replace"}
                 try:
                     data = loads(cls.json_db.read_text())
                     if any(x not in data for x in ["tag", "rating", "query"]):
@@ -247,7 +248,7 @@ class QData:
                     return f'Error reading {cls.json_db}: {repr(err)}'
                 for key in ["add", "keep", "excl", "srch", "repl"]:
                     if key in data:
-                        err = getattr(cls, f"update_{key}")(data[key])
+                        err = getattr(cls, f"update_{fixme[key]}")(data[key])
                         if err:
                             return err
                 cls.weighed = (data["tag"], data["rating"])
