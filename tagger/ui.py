@@ -22,19 +22,19 @@ def unload_interrogators() -> List[str]:
         if i.unload():
             unloaded_models = unloaded_models + 1
 
-    return [f'Successfully unload {unloaded_models} model(s)']
+    return (f'Successfully unload {unloaded_models} model(s)',)
 
 
 def on_interrogate(button: str, name: str, inverse=False) -> it_ret_tp:
     if It.err != '':
-        return [None, None, None, It.err]
+        return (None, None, None, It.err)
 
     if name in utils.interrogators:
         it: It = utils.interrogators[name]
         QData.inverse = inverse
         return it.batch_interrogate(button == BATCH_REWRITE)
 
-    return [None, None, None, f"'{name}': invalid interrogator"]
+    return (None, None, None, f"'{name}': invalid interrogator")
 
 
 def on_inverse_interrogate(button: str, name: str) -> it_ret_tp:
@@ -44,27 +44,63 @@ def on_inverse_interrogate(button: str, name: str) -> it_ret_tp:
 
 def on_interrogate_image(image: Image, interrogator: str) -> it_ret_tp:
     if It.err != '':
-        return [None, None, None, It.err]
+        return (None, None, None, It.err)
 
     if image is None:
-        return [None, None, None, 'No image selected']
+        return (None, None, None, 'No image selected')
 
     if interrogator in utils.interrogators:
         interrogator: It = utils.interrogators[interrogator]
         return interrogator.interrogate_image(image)
 
-    return [None, None, None, f"'{interrogator}': invalid interrogator"]
+    return (None, None, None, f"'{interrogator}': invalid interrogator")
+
+
+def move_filter_to_input_fn(
+    tag_search_filter: str,
+    name: str,
+    input: str
+) -> Tuple[str, str, Dict[str, float], Dict[str, float], str]:
+    if It.output is None:
+        return (None, None, None, None, '')
+
+    filt = {(k, v) for k, v in It.output[2].items() if tag_search_filter in k}
+    if len(filt) == 0:
+        return (None, None, None, None, '')
+
+    add = set(dict(filt).keys())
+    if It.input[input] != '':
+        add = add.union({x.strip() for x in It.input[input].split(',')})
+
+    It.input[input] = ', '.join(add)
+
+    ret = on_interrogate(BATCH_REWRITE, name, QData.inverse)
+    return (It.input[input],) + ret
+
+
+def move_filter_to_keep_fn(
+    tag_search_filter: str, name: str
+) -> Tuple[str, str, Dict[str, float], str]:
+    ret = move_filter_to_input_fn(tag_search_filter, name, "keep")
+    # ratings are not displayed on this tab
+    return ('',) + ret[:2] + ret[3:]
+
+
+def move_filter_to_exclude_fn(
+    tag_search_filter: str, name: str
+) -> Tuple[str, str, Dict[str, float], Dict[str, float], str]:
+    return ('',) + move_filter_to_input_fn(tag_search_filter, name, "exclude")
 
 
 def on_tag_search_filter_change(
-    tag_search_filter: str
-) -> Tuple[Dict[str, float], str]:
+    part: str
+) -> Tuple[str, Dict[str, float], str]:
     if It.output is None:
-        return [None, '']
-    if len(tag_search_filter) < 2:
-        return [It.output[2], '']
-    filt = filter(lambda x: tag_search_filter in x[0], It.output[2].items())
-    return [dict(filt), '']
+        return (None, None, '')
+    if len(part) < 2:
+        return (It.output[0], It.output[2], '')
+    tags = dict(filter(lambda x: part in x[0], It.output[2].items()))
+    return (', '.join(tags.keys()), tags, '')
 
 
 def on_ui_tabs():
@@ -169,16 +205,6 @@ def on_ui_tabs():
                             maximum=1,
                             value=QData.threshold
                         )
-                        keep_tags = utils.preset.component(
-                            gr.Textbox,
-                            label='Keep tags regardless of thresholds (comma split)',
-                            elem_id='keep-tags'
-                        )
-                        search_tags = utils.preset.component(
-                            gr.Textbox,
-                            label='Search tags (comma split)',
-                            elem_id='search-tags'
-                        )
                         cumulative = utils.preset.component(
                             gr.Checkbox,
                             label='combine interrogations',
@@ -186,8 +212,8 @@ def on_ui_tabs():
                         )
                         threshold_on_average = utils.preset.component(
                             gr.Checkbox,
-                            label='threshold applies on average of all images'
-                            ' and interrogations',
+                            label='threshold applies on average of all images '
+                            'and interrogations',
                             value=It.input["threshold_on_average"]
                         )
                         save_tags = utils.preset.component(
@@ -204,20 +230,11 @@ def on_ui_tabs():
                             value=QData.count_threshold,
                             step=1.0
                         )
-                        exclude_tags = utils.preset.component(
-                            gr.Textbox,
-                            label='Exclude tags (regardless, comma split)',
-                            elem_id='exclude-tags'
-                        )
-                        replace_tags = utils.preset.component(
-                            gr.Textbox,
-                            label='Replacement tags (comma split)',
-                            elem_id='replace-tags'
-                        )
+
                         large_query = utils.preset.component(
                             gr.Checkbox,
-                            label='huge batch query (tensorflow 2.10,'
-                            ' experimental)',
+                            label='huge batch query (tensorflow 2.10, '
+                            'experimental)',
                             value=It.input["large_query"],
                             interactive=version.parse(tf_version) ==
                             version.parse('2.10')
@@ -227,14 +244,49 @@ def on_ui_tabs():
                             label='Unload model after running',
                             value=It.input["unload_after"]
                         )
+                with gr.Row(variant='compact'):
+                    with gr.Column(variant='compact'):
+                        search_tags = utils.preset.component(
+                            gr.Textbox,
+                            label='Search tags (comma split)',
+                            elem_id='search-tags'
+                        )
+                        keep_tags = utils.preset.component(
+                            gr.Textbox,
+                            label='Preserved tags; regardless of thresholds, '
+                            'comma delimited',
+                            elem_id='keep-tags'
+                        )
+                    with gr.Column(variant='compact'):
+                        replace_tags = utils.preset.component(
+                            gr.Textbox,
+                            label='Replacement tags (comma split)',
+                            elem_id='replace-tags'
+                        )
+                        exclude_tags = utils.preset.component(
+                            gr.Textbox,
+                            label='Excluded tags; regardless, comma delimited',
+                            elem_id='exclude-tags'
+                        )
 
             # output components
             with gr.Column(variant='panel'):
+
                 with gr.Tabs():
                     tab_ratings_and_included_tags = gr.TabItem(label='Ratings and included tags')
-                    tab_excluded_tags = gr.TabItem(label='Excluded tags')
+                    tab_discarded_tags = gr.TabItem(label='Excluded tags')
                     with tab_ratings_and_included_tags:
-                        tags = gr.Textbox(
+                        with gr.Row(variant='compact'):
+                            with gr.Column(variant='compact'):
+                                move_filter_to_exclude = gr.Button(
+                                    value='Move visible tags to exclude tags',
+                                    variant='secondary'
+                                )
+                            with gr.Column(variant='compact'):
+                                tag_search_selected = utils.preset.component(
+                                    gr.Textbox,
+                                    label='string search selected tags'
+                                )
                             label='Tags',
                             placeholder='Found tags',
                             interactive=False,
@@ -249,23 +301,28 @@ def on_ui_tabs():
                                 None,
                                 tags
                             )
-
                         rating_confidences = gr.Label(
                             label='Rating confidences',
                             elem_id='rating-confidences',
                         )
-                        with gr.Row(variant='compact'):
-                            tag_search_filter = utils.preset.component(
-                                gr.Textbox,
-                                label='search tags in lists, regex or comma split',
-                                elem_id='tag-search-filter'
-                            )
                         tag_confidences = gr.Label(
                             label='Tag confidences',
                             elem_id='tag-confidences',
                         )
-                    with tab_excluded_tags:
-                        excluded_tags = gr.Textbox(
+                    with tab_discarded_tags:
+                        with gr.Row(variant='compact'):
+                            with gr.Column(variant='compact'):
+                                move_filter_to_keep = gr.Button(
+                                    value='Move visible tags to keep tags',
+                                    variant='secondary'
+                                )
+                            with gr.Column(variant='compact'):
+                                tag_search_excluded = utils.preset.component(
+                                    gr.Textbox,
+                                    label='string search excluded tags'
+                                )
+
+                        discarded_tags = gr.Textbox(
                             label='Tags',
                             placeholder='Discarding tags',
                             interactive=False,
@@ -281,55 +338,90 @@ def on_ui_tabs():
                                  outputs=[tags, rating_confidences,
                                           tag_confidences, info])
 
-        tab_excluded_tags.select(fn=wrap_gradio_gpu_call(on_inverse_interrogate),
+        tab_discarded_tags.select(fn=wrap_gradio_gpu_call(on_inverse_interrogate),
                                  inputs=[batch_rewrite, interrogator],
-                                 outputs=[excluded_tags,
+                                 outputs=[discarded_tags,
                                           excluded_tag_confidences, info])
 
-        cumulative.input(fn=It.flip('cumulative'), inputs=[], outputs=[])
-        large_query.input(fn=It.flip('large_query'), inputs=[], outputs=[])
-        unload_after.input(fn=It.flip('unload_after'), inputs=[], outputs=[])
-        threshold_on_average.input(fn=It.flip('threshold_on_average'), inputs=[], outputs=[])
+        move_filter_to_keep.click(
+            fn=wrap_gradio_gpu_call(move_filter_to_keep_fn),
+            inputs=[tag_search_excluded, interrogator],
+            outputs=[
+                tag_search_excluded,
+                keep_tags,
+                discarded_tags,
+                excluded_tag_confidences,
+                info
+            ]
+        )
+        move_filter_to_exclude.click(
+            fn=wrap_gradio_gpu_call(move_filter_to_exclude_fn),
+            inputs=[tag_search_selected, interrogator],
+            outputs=[
+                tag_search_selected,
+                exclude_tags,
+                tags,
+                rating_confidences,
+                tag_confidences,
+                info
+            ]
+        )
+        cumulative.input(fn=wrap_gradio_gpu_call(It.flip('cumulative')), inputs=[], outputs=[info])
+        large_query.input(fn=wrap_gradio_gpu_call(It.flip('large_query')), inputs=[], outputs=[info])
+        unload_after.input(fn=wrap_gradio_gpu_call(It.flip('unload_after')), inputs=[], outputs=[info])
+        threshold_on_average.input(fn=wrap_gradio_gpu_call(It.flip('threshold_on_average')), inputs=[], outputs=[info])
 
-        save_tags.input(fn=IOData.flip_save_tags(), inputs=[], outputs=[])
-        input_glob.blur(fn=It.set("input_glob"), inputs=[input_glob],
+        save_tags.input(fn=wrap_gradio_gpu_call(IOData.flip_save_tags()), inputs=[], outputs=[info])
+        input_glob.blur(fn=wrap_gradio_gpu_call(It.set("input_glob")), inputs=[input_glob],
                         outputs=[info])
-        output_dir.blur(fn=It.set("output_dir"), inputs=[output_dir],
+        output_dir.blur(fn=wrap_gradio_gpu_call(It.set("output_dir")), inputs=[output_dir],
                         outputs=[info])
 
-        threshold.input(fn=QData.set("threshold"), inputs=[threshold],
-                        outputs=[])
-        threshold.release(fn=QData.set("threshold"), inputs=[threshold],
-                          outputs=[])
-
-        count_threshold.input(fn=QData.set("count_threshold"),
-                              inputs=[count_threshold], outputs=[])
-        count_threshold.release(fn=QData.set("count_threshold"),
-                                inputs=[count_threshold], outputs=[])
-
-        add_tags.blur(fn=It.set('add'), inputs=[add_tags], outputs=[info])
-        keep_tags.blur(fn=It.set('keep'), inputs=[keep_tags], outputs=[info])
-        exclude_tags.blur(fn=It.set('exclude'), inputs=[exclude_tags],
+        threshold.input(fn=wrap_gradio_gpu_call(QData.set("threshold")), inputs=[threshold],
+                        outputs=[info])
+        threshold.release(fn=wrap_gradio_gpu_call(QData.set("threshold")), inputs=[threshold],
                           outputs=[info])
-        search_tags.blur(fn=It.set('search'), inputs=[search_tags],
+
+        count_threshold.input(fn=wrap_gradio_gpu_call(QData.set("count_threshold")),
+                              inputs=[count_threshold], outputs=[info])
+        count_threshold.release(fn=wrap_gradio_gpu_call(QData.set("count_threshold")),
+                                inputs=[count_threshold], outputs=[info])
+
+        add_tags.blur(fn=wrap_gradio_gpu_call(It.set('add')), inputs=[add_tags], outputs=[info])
+        keep_tags.blur(fn=wrap_gradio_gpu_call(It.set('keep')), inputs=[keep_tags], outputs=[info])
+        exclude_tags.blur(fn=wrap_gradio_gpu_call(It.set('exclude')), inputs=[exclude_tags],
+                          outputs=[info])
+        search_tags.blur(fn=wrap_gradio_gpu_call(It.set('search')), inputs=[search_tags],
                          outputs=[info])
-        replace_tags.blur(fn=It.set('replace'), inputs=[replace_tags],
+        replace_tags.blur(fn=wrap_gradio_gpu_call(It.set('replace')), inputs=[replace_tags],
                           outputs=[info])
 
         # register events
-        tag_search_filter.change(
+        tag_search_selected.change(
             fn=wrap_gradio_gpu_call(on_tag_search_filter_change),
-            inputs=[tag_search_filter],
-            outputs=[tag_confidences, info]
+            inputs=[tag_search_selected],
+            outputs=[tags, tag_confidences, info]
         )
 
         # register events
-        tag_search_filter.blur(
+        tag_search_selected.blur(
             fn=wrap_gradio_gpu_call(on_tag_search_filter_change),
-            inputs=[tag_search_filter],
-            outputs=[tag_confidences, info]
+            inputs=[tag_search_selected],
+            outputs=[tags, tag_confidences, info]
         )
 
+        tag_search_excluded.change(
+            fn=wrap_gradio_gpu_call(on_tag_search_filter_change),
+            inputs=[tag_search_excluded],
+            outputs=[discarded_tags, excluded_tag_confidences, info]
+        )
+
+        # register events
+        tag_search_excluded.blur(
+            fn=wrap_gradio_gpu_call(on_tag_search_filter_change),
+            inputs=[tag_search_excluded],
+            outputs=[discarded_tags, excluded_tag_confidences, info]
+        )
         # register events
         selected_preset.change(
             fn=utils.preset.apply,

@@ -52,10 +52,11 @@ class Interrogator:
         "unload_after": False,
         "threshold_on_average": False,
         "add": '',
+        "keep": '',
+        "exclude": '',
         "search": '',
         "replace": '',
         "paths": '',
-        "exclude": '',
         "input_glob": '',
         "output_dir": '',
     }
@@ -66,6 +67,7 @@ class Interrogator:
     def flip(cls, key):
         def toggle():
             cls.input[key] = not cls.input[key]
+            return ('')
         return toggle
 
     @classmethod
@@ -81,7 +83,8 @@ class Interrogator:
                     if cls.err != '':
                         cls.err += '\n'
                     cls.err += err
-            return (cls.err)
+            return (cls.err,)
+
         return setter
 
     def __init__(self, name: str) -> None:
@@ -140,7 +143,7 @@ class Interrogator:
             image_list = [str(x[0].resolve()) for x in IOData.paths]
             err = self.large_batch_interrogate(image_list, self.run_mode == 0)
             if err:
-                return [None, None, None, err]
+                return (None, None, None, err)
 
             self.run_mode = (self.run_mode + 1) % 2
             Interrogator.output = QData.finalize(len(image_list))

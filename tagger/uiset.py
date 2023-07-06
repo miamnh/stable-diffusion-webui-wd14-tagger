@@ -193,38 +193,40 @@ class QData:
 
     @classmethod
     def update_keep(cls, keep: str) -> str:
-        cls.keep_tags = set(map(lambda x: x.strip(), keep.split(',')))
+        cls.keep_tags = set([x.strip() for x in keep.split(',') if x.strip()])
         return ''
 
     @classmethod
     def update_add(cls, add: str) -> str:
-        cls.add_tags = [x.strip() for x in add.split(',')]
+        cls.add_tags = [x.strip() for x in add.split(',') if x.strip()]
         return ''
 
     @classmethod
     def update_exclude(cls, exclude: str) -> str:
-        cls.excl_tags = set(map(lambda x: x.strip(), exclude.split(',')))
-        if len(cls.excl_tags) == 1:
-            cls.rexcl = re_comp('^'+cls.excl_tags.pop()+'$', flags=IGNORECASE)
-        else:
+        # first filter empty strings
+        if ',' in exclude:
+            filtered = [x.strip() for x in exclude.split(',') if x.strip()]
+            cls.excl_tags = set(filtered)
             cls.rexcl = None
+        else:
+            exclude = exclude.strip()
+            cls.rexcl = re_comp('^'+exclude+'$', flags=IGNORECASE)
         return ''
 
     @classmethod
     def update_search(cls, search: str) -> str:
-        srch_map = [x.strip() for x in search.split(',')]
+        srch_map = [x.strip() for x in search.split(',') if x.strip()]
         cls.srch_tags = dict(enumerate(srch_map))
         slen = len(cls.srch_tags)
         if slen == 1:
-            regex = '^'+cls.srch_tags.pop()+'$'
-            cls.re_srch = re_comp(regex, flags=IGNORECASE)
+            cls.re_srch = re_comp('^'+srch_map[0]+'$', flags=IGNORECASE)
         elif slen != len(cls.repl_tags):
             return 'search, replace: unequal len, replacements > 1.'
         return ''
 
     @classmethod
     def update_replace(cls, replace: str) -> str:
-        repl_tag_map = [x.strip() for x in replace.split(',')]
+        repl_tag_map = [x.strip() for x in replace.split(',') if x.strip()]
         cls.repl_tags = list(repl_tag_map)
         if cls.re_srch is None and len(cls.srch_tags) != len(cls.repl_tags):
             return 'search, replace: unequal len, replacements > 1.'
@@ -242,9 +244,31 @@ class QData:
                         raise TypeError
                 except Exception as err:
                     return f'error reading {cls.json_db}: {repr(err)}'
+                for key in ["add", "keep", "excl", "srch", "repl"]:
+                    if key in data:
+                        err = getattr(cls, f"update_{key}")(data[key])
+                        if err:
+                            return err
                 cls.weighed = (data["tag"], data["rating"])
                 cls.query = data["query"]
         return ''
+
+    @classmethod
+    def write_json(cls) -> None:
+        """ write db.json """
+        if cls.json_db is not None:
+            srch = sorted(cls.srch_tags.items(), key=lambda x: x[0])
+            data = {
+                "tag": cls.weighed[0],
+                "rating": cls.weighed[1],
+                "query": cls.query,
+                "add": ','.join(cls.add_tags),
+                "keep": ','.join(cls.keep_tags),
+                "excl": ','.join(cls.excl_tags),
+                "srch": ','.join([x[1] for x in srch]),
+                "repl": ','.join(cls.repl_tags)
+            }
+            cls.json_db.write_text(dumps(data, indent=2))
 
     @classmethod
     def move_filter_to_exclude(cls) -> None:
@@ -299,7 +323,8 @@ class QData:
                     ent = re_sub(cls.re_srch, cls.repl_tags[0], ent, 1)
                 elif ent in cls.srch_tags:
                     ent = cls.repl_tags[cls.srch_tags[ent]]
-                if ent in cls.keep_tags:
+
+                if ent in cls.keep_tags or ent in cls.add_tags:
                     continue
                 if on_avg or cls.is_excluded(ent) or val < cls.threshold:
                     if ent not in cls.tags:
@@ -346,7 +371,9 @@ class QData:
                 elif ent in cls.srch_tags:
                     ent = cls.repl_tags[cls.srch_tags[ent]]
                 if ent not in cls.keep_tags:
-                    if cls.is_excluded(ent) or on_avg and val < cls.threshold:
+                    if cls.is_excluded(ent):
+                        continue
+                    if not on_avg and val < cls.threshold:
                         continue
                 for_tags_file += ", " + ent
                 count += 1
@@ -375,11 +402,7 @@ class QData:
     ) -> it_ret_tp:
         """ finalize the batch query """
         if cls.json_db and ct > 0:
-            cls.json_db.write_text(dumps({
-                "tag": cls.weighed[0],
-                "rating": cls.weighed[1],
-                "query": cls.query
-            }))
+            cls.write_json()
 
         # collect the weights per file/interrogation of the prior in db stored.
         for index in range(2):
@@ -398,7 +421,7 @@ class QData:
     @classmethod
     def finalize(cls, count: int, on_avg: bool) -> it_ret_tp:
         """ finalize the query, return the results """
-        output = ['', {}, {}, '']
+        tags_str, ratings, tags = '', {}, {}
 
         def averager(x):
             return x[0], x[1] / count
@@ -416,11 +439,11 @@ class QData:
             iter = map(averager, cls.tags.items())
 
         for k, already_averaged_val in iter:
-            output[2][k] = already_averaged_val
-            output[0] = output[0] + ', ' + k if output[0] else k
+            tags[k] = already_averaged_val
+            tags_str += ', ' + k if tags_str else k
 
         for ent, val in cls.ratings.items():
-            output[1][ent] = val / count
+            ratings[ent] = val / count
 
         print('all done :)')
-        return output
+        return (tags_str[2:], ratings, tags, '')
