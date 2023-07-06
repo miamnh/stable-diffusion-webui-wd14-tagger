@@ -40,6 +40,35 @@ function waitQuerySelector(selector, timeout = 5000, $rootElement = gradioApp())
     })
 }
 
+function tag_clicked(tag, is_inverse) {
+  // escaped characters
+  const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // add the tag to the selected textarea
+  let $selectedTextarea;
+  if (is_inverse) {
+    $selectedTextarea = document.getElementById('keep-tags');
+  } else {
+    $selectedTextarea = document.getElementById('exclude-tags');
+  }
+  let value = $selectedTextarea.querySelector('textarea').value;
+  // ignore if tag is already exist in textbox
+  const pattern = new RegExp(`(^|,)\\s{0,}${escapedTag}\\s{0,}($|,)`);
+  if (pattern.test(value)) {
+    return;
+  }
+  const emptyRegex = new RegExp(`^\\s*$`);
+  if (!emptyRegex.test(value)) {
+    value += ', ';
+  }
+  // besides setting the value an event needs to be triggered or the value isn't actually stored.
+  const input_event = new Event('input');
+  $selectedTextarea.querySelector('textarea').value = value + escapedTag;
+  $selectedTextarea.dispatchEvent(input_event);
+  const input_event2 = new Event('blur');
+  $selectedTextarea.dispatchEvent(input_event2);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     Promise.all([
         // option texts
@@ -117,6 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             let value = $selectedTextarea.querySelector('textarea').value;
+            // except replace_tag because multiple can be replaced with the same
             if ($selectedTextarea != $replaceTags) {
                 // ignore if tag is already exist in textbox
                 const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

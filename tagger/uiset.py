@@ -161,7 +161,7 @@ def get_i_wt(stored: float) -> Tuple[int, float]:
     similar for the "query" dict. Same increment per filestamp-interrogation.
     """
     i = ceil(stored) - 1
-    return (i, stored - i)
+    return i, stored - i
 
 
 class QData:
@@ -188,45 +188,46 @@ class QData:
     def set(cls, key: str) -> Callable[[str], Tuple[str]]:
         def setter(val) -> Tuple[str]:
             setattr(cls, key, val)
-            return ('')
+            return ('',)
         return setter
 
     @classmethod
     def update_keep(cls, keep: str) -> str:
-        cls.keep_tags = set([x.strip() for x in keep.split(',') if x.strip()])
+        cls.keep_tags = {x for x in map(str.strip, keep.split(',')) if x != ''}
         return ''
 
     @classmethod
     def update_add(cls, add: str) -> str:
-        cls.add_tags = [x.strip() for x in add.split(',') if x.strip()]
+        cls.add_tags = [x for x in map(str.strip, add.split(',')) if x != '']
         return ''
 
     @classmethod
     def update_exclude(cls, exclude: str) -> str:
         # first filter empty strings
         if ',' in exclude:
-            filtered = [x.strip() for x in exclude.split(',') if x.strip()]
+            filtered = [x for x in map(str.strip, exclude.split(',')) if x != '']
             cls.excl_tags = set(filtered)
             cls.rexcl = None
         else:
             exclude = exclude.strip()
+            print(f'exclude: ^{exclude}$')
             cls.rexcl = re_comp('^'+exclude+'$', flags=IGNORECASE)
         return ''
 
     @classmethod
     def update_search(cls, search: str) -> str:
-        srch_map = [x.strip() for x in search.split(',') if x.strip()]
-        cls.srch_tags = dict(enumerate(srch_map))
+        srch = [x for x in map(str.strip, search.split(',')) if x != '']
+        cls.srch_tags = dict(enumerate(srch))
         slen = len(cls.srch_tags)
-        if slen == 1:
-            cls.re_srch = re_comp('^'+srch_map[0]+'$', flags=IGNORECASE)
+        if len(cls.srch_tags) == 1:
+            cls.re_srch = re_comp('^'+srch[0]+'$', flags=IGNORECASE)
         elif slen != len(cls.repl_tags):
             return 'search, replace: unequal len, replacements > 1.'
         return ''
 
     @classmethod
     def update_replace(cls, replace: str) -> str:
-        repl_tag_map = [x.strip() for x in replace.split(',') if x.strip()]
+        repl_tag_map = [x for x in map(str.strip, replace.split(',')) if x != '']
         cls.repl_tags = list(repl_tag_map)
         if cls.re_srch is None and len(cls.srch_tags) != len(cls.repl_tags):
             return 'search, replace: unequal len, replacements > 1.'
@@ -240,10 +241,10 @@ class QData:
             if cls.json_db.is_file():
                 try:
                     data = loads(cls.json_db.read_text())
-                    if "tag" not in data or "rating" not in data or len(data) < 3:
+                    if any(x not in data for x in ["tag", "rating", "query"]):
                         raise TypeError
                 except Exception as err:
-                    return f'error reading {cls.json_db}: {repr(err)}'
+                    return f'Error reading {cls.json_db}: {repr(err)}'
                 for key in ["add", "keep", "excl", "srch", "repl"]:
                     if key in data:
                         err = getattr(cls, f"update_{key}")(data[key])
@@ -283,10 +284,24 @@ class QData:
             if cls.query[fi_key][0] != '':
                 print(f'Dup or rename: Identical checksums for {path}\n'
                       'and: {cls.query[fi_key][0]} (path updated)')
-            cls.query[fi_key][0] = path
+            cls.query[fi_key] = (path, cls.query[fi_key][1])
 
         # this file was already queried for this interrogator.
         return cls.query[fi_key][1]
+
+    @classmethod
+    def get_single_data(cls, fi_key: str) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """ get tags and ratings for filestamp-interrogator """
+        index = QData.query.get(fi_key)[1]
+        data = [{}, {}]
+        for j in range(2):
+            for ent, lst in cls.weighed[j].items():
+                for i, val in map(get_i_wt, lst):
+                    if i == index:
+                        data[j][ent] = val
+
+        return tuple(data)
+
 
     @classmethod
     def init_query(cls) -> None:
@@ -296,7 +311,7 @@ class QData:
     @classmethod
     def is_excluded(cls, ent: str) -> bool:
         """ check if tag is excluded """
-        return cls.rexcl.match(ent) if cls.rexcl else ent in cls.excl_tags
+        return re_match(cls.rexcl, ent) if cls.rexcl else ent in cls.excl_tags
 
     @classmethod
     def apply_filters(
@@ -388,7 +403,7 @@ class QData:
             print(f'{data[0]}: {count}/{len(tags)} tags kept')
 
         if do_store:
-            cls.query[fi_key] = [data[0], len(cls.query)]
+            cls.query[fi_key] = (data[0], len(cls.query))
 
         if data[1]:
             data[1].write_text(for_tags_file[2:], encoding='utf-8')
@@ -426,21 +441,26 @@ class QData:
         def averager(x):
             return x[0], x[1] / count
 
+        js_bool = 'true' if cls.inverse else 'false'
+
         if on_avg:
             if cls.inverse:
                 def inverse_filt(x):
-                    return cls.is_excluded(x[0]) or x[1] < cls.threshold
+                    return cls.is_excluded(x[0]) or x[1] < cls.threshold and \
+                           not x[0] in cls.keep_tags
                 iter = filter(inverse_filt, map(averager, cls.tags.items()))
             else:
                 def filt(x):
-                    return not cls.is_excluded(x[0]) and x[1] >= cls.threshold
+                    return not cls.is_excluded(x[0]) and \
+                           (x[1] >= cls.threshold or x[0] in cls.keep_tags)
                 iter = filter(filt,  map(averager, cls.tags.items()))
         else:
             iter = map(averager, cls.tags.items())
 
         for k, already_averaged_val in iter:
             tags[k] = already_averaged_val
-            tags_str += ', ' + k if tags_str else k
+            # trigger an event to place the tag in the active tags list
+            tags_str += f""", <a href='javascript:tag_clicked("{k}", {js_bool})'>{k}</a>"""
 
         for ent, val in cls.ratings.items():
             ratings[ent] = val / count

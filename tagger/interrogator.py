@@ -61,29 +61,26 @@ class Interrogator:
         "output_dir": '',
     }
     output = None
-    err = ''
 
     @classmethod
     def flip(cls, key):
         def toggle():
             cls.input[key] = not cls.input[key]
-            return ('')
+            return ('',)
         return toggle
 
     @classmethod
-    def set(cls, key: str) -> Callable[[str], Tuple[str]]:
-        def setter(val) -> Tuple[str]:
+    def set(cls, key: str) -> Callable[[str], Tuple[str, str]]:
+        def setter(val) -> Tuple[str, str]:
+            err = ''
             if val != cls.input[key]:
-                cls.input[key] = val
                 if key == 'input_glob' or key == 'output_dir':
                     err = getattr(IOData, "update_" + key)(val)
                 else:
                     err = getattr(QData, "update_" + key)(val)
-                if err != '':
-                    if cls.err != '':
-                        cls.err += '\n'
-                    cls.err += err
-            return (cls.err,)
+                if err == '':
+                    cls.input[key] = val
+            return cls.input[key], err
 
         return setter
 
@@ -114,7 +111,7 @@ class Interrogator:
 
         if fi_key in QData.query:
             # this file was already queried for this interrogator.
-            data = QData.query.get(fi_key)
+            data = QData.get_single_data(fi_key)
             # clear: the data does not require storage
             fi_key = ""
         else:
@@ -124,15 +121,13 @@ class Interrogator:
                 self.unload()
 
         on_avg = Interrogator.input["threshold_on_average"]
-        QData.apply_filters(['', ''] + data, fi_key, on_avg)
-        to_exclude = False
-        Interrogator.output = QData.finalize(1, on_avg, to_exclude)
+        QData.apply_filters(('', '') + data, fi_key, on_avg)
+        Interrogator.output = QData.finalize(1, on_avg)
         return Interrogator.output
 
     def batch_interrogate(
         self,
         batch_rewrite: bool,
-        to_exclude=False
     ) -> it_ret_tp:
         QData.init_query()
         in_db = {}
@@ -180,7 +175,7 @@ class Interrogator:
                 print(f'new file {abspath}: requires interrogation (skipped)')
             else:
                 data = (abspath, out_path) + self.interrogate(image)
-                QData.apply_filters(data, fi_key, on_avg, to_exclude)
+                QData.apply_filters(data, fi_key, on_avg)
 
         if Interrogator.input["unload_after"]:
             self.unload()
