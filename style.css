@@ -7,25 +7,26 @@
 }
 
 #rating-confidences .output-label>div:not(:first-child):hover {
-    background-color: #f5f5f5;
+    foreground-color: #f5f5f5;
 }
 
 #tag-confidences .output-label>div:not(:first-child):hover {
-    background-color: #f5f5f5;
+    foreground-color: #f5f5f5;
 }
 
 #rating-confidences .output-label>div:not(:first-child):active {
-    background-color: #e6e6e6;
+    foreground-color: #e6e6e6;
 }
 
 #tag-confidences .output-label>div:not(:first-child):active {
-    background-color: #e6e6e6;
+    foreground-color: #e6e6e6;
 }
 
-#a:hover {
-    background-color: #f5f5f5;
+#tags a {
+    font-weight: inherit;
+    color: #888;
 }
-#a:active {
-    background-color: #e6e6e6;
+#tags a:hover {
+    color: #f5f5f5;
 }
 

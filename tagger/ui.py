@@ -306,7 +306,7 @@ def on_ui_tabs():
                         # clickable tags to populate excluded tags
                         tags = gr.HTML(
                             label='Tags',
-                            elem_classes=':link',
+                            elem_id='tags',
                         )
 
                         with gr.Row():
@@ -329,7 +329,7 @@ def on_ui_tabs():
                         # clickable tags to populate keep tags
                         discarded_tags = gr.HTML(
                             label='Tags',
-                            elem_classes=':link',
+                            elem_id='tags',
                         )
                         excluded_tag_confidences = gr.Label(
                             label='Excluded Tag confidences',
