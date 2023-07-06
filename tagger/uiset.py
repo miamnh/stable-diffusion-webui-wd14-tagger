@@ -366,6 +366,9 @@ class QData:
 
         # loop over tags with db update
         for ent, val in tags:
+            if isinstance(ent, float):
+                print(f'float: {ent} {val}')
+                continue
             if do_store:
                 if val > 0.005:
                     if ent not in cls.weighed[1]:

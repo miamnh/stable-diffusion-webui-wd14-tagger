@@ -68,6 +68,10 @@ def refresh_interrogators() -> List[str]:
             'wd-v1-4-convnextv2-tagger-v2',
             repo_id='SmilingWolf/SW-CV-ModelZoo'
         ),
+        'Z3D-E621-Convnext': WaifuDiffusionInterrogator(
+            'Z3D-E621-Convnext'
+        ),
+
     }
 
     # load deepdanbooru project
@@ -116,7 +120,7 @@ def refresh_interrogators() -> List[str]:
         tags_path = Path(path, csv[0])
 
         if path.name not in interrogators:
-            raise NotImplementedError("Add model to interrogators dict in tagger/utils.py")
+            raise NotImplementedError(f"Add {path.name} model to interrogators dict in tagger/utils.py")
 
         interrogators[path.name].model_path = model_path
         interrogators[path.name].tags_path = tags_path
