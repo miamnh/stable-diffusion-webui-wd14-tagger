@@ -183,6 +183,7 @@ class QData:
     ratings = {}
     tags = {}
     inverse = False
+    had_renames = False
 
     @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str]]:
@@ -238,6 +239,7 @@ class QData:
         if getattr(shared.opts, 'tagger_auto_serde_json', True):
             cls.json_db = outdir.joinpath('db.json')
             if cls.json_db.is_file():
+                cls.had_renames = False
                 try:
                     data = loads(cls.json_db.read_text())
                     if any(x not in data for x in ["tag", "rating", "query"]):
@@ -251,6 +253,7 @@ class QData:
                             return err
                 cls.weighed = (data["tag"], data["rating"])
                 cls.query = data["query"]
+                print(f'Read {cls.json_db}: {len(cls.query)} interrogations, {len(cls.tags)} tags.')
         return ''
 
     @classmethod
@@ -269,12 +272,7 @@ class QData:
                 "repl": ','.join(cls.replace_tags)
             }
             cls.json_db.write_text(dumps(data, indent=2))
-
-    @classmethod
-    def move_filter_to_exclude(cls) -> None:
-        """ move filter tags to exclude tags """
-
-        cls.exclude_tags.update()
+            print(f'Wrote {cls.json_db}: {len(cls.query)} interrogations, {len(cls.tags)} tags.')
 
     @classmethod
     def get_index(cls, fi_key: str, path='') -> int:
@@ -282,10 +280,10 @@ class QData:
         if path and path != cls.query[fi_key][0]:
             if cls.query[fi_key][0] != '':
                 print(f'Dup or rename: Identical checksums for {path}\n'
-                      'and: {cls.query[fi_key][0]} (path updated)')
+                      f'and: {cls.query[fi_key][0]} (path updated)')
+                cls.had_renames = True
             cls.query[fi_key] = (path, cls.query[fi_key][1])
 
-        # this file was already queried for this interrogator.
         return cls.query[fi_key][1]
 
     @classmethod
@@ -418,7 +416,7 @@ class QData:
         on_avg: bool
     ) -> it_ret_tp:
         """ finalize the batch query """
-        if cls.json_db and ct > 0:
+        if cls.json_db and ct > 0 or cls.had_renames:
             cls.write_json()
 
         # collect the weights per file/interrogation of the prior in db stored.
