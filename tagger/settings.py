@@ -2,8 +2,8 @@ from modules import shared
 from typing import List
 
 # kaomoji from WD 1.4 tagger csv. thanks, Meow-San#5400!
-DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, '
-'3_3, 6_9, >_o, @_@, ^_^, o_o, u_u, x_x, |_|, ||_||'
+DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, '\
+                  '3_3, 6_9, >_o, @_@, ^_^, o_o, u_u, x_x, |_|, ||_||'
 
 DEFAULT_OFF = '[name].[output_extension]'
 
