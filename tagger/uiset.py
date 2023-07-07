@@ -1,10 +1,11 @@
 """ for handling ui settings """
 
-from typing import List, Dict, Tuple, Callable
+from typing import List, Dict, Tuple, Callable, Set
 import os
 from pathlib import Path
 from glob import glob
 from math import ceil
+from hashlib import sha256
 from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
 from json import dumps, loads
 from PIL import Image
@@ -62,6 +63,26 @@ class IOData:
             err = cls.set_batch_io(paths)
             return err
         return ''
+
+    @classmethod
+    def get_bytes_hash(cls, bytes) -> str:
+        """ get sha256 hash of file """
+        # Note: the hash from an image is not the same as from file
+        return sha256(bytes).hexdigest()
+
+    @classmethod
+    def get_hashes(cls):
+        """ get hashes of all files """
+        ret = set()
+        for i in range(len(cls.paths)):
+            if len(cls.paths[i]) == 4:
+                ret.add(cls.paths[i][3])
+            else:
+                image = Image.open(cls.paths[i][0])
+                hash = cls.get_bytes_hash(image.tobytes())
+                cls.paths[i].append(hash)
+                ret.add(hash)
+        return ret
 
     @classmethod
     def update_input_glob(cls, input_glob: str) -> str:
@@ -179,11 +200,11 @@ class QData:
     json_db = None
     weighed = ({}, {})
     query = {}
-    data = None
     ratings = {}
     tags = {}
     inverse = False
     had_renames = False
+    ct = 0
 
     @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str]]:
@@ -299,11 +320,11 @@ class QData:
 
         return tuple(data)
 
-
     @classmethod
-    def init_query(cls) -> None:
+    def reset(cls) -> None:
         cls.tags.clear()
         cls.ratings.clear()
+        cls.ct = 0
 
     @classmethod
     def is_excluded(cls, ent: str) -> bool:
@@ -315,9 +336,10 @@ class QData:
         cls,
         data,
         fi_key: str,
-        on_avg: bool,
+        th_on_avg: bool,
     ):
         """ apply filters to query data, store in db.json if required """
+        # th_on_avg: if true thresholds apply not here but on average rating
 
         replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
 
@@ -338,7 +360,7 @@ class QData:
 
                 if ent in cls.keep_tags or ent in cls.add_tags:
                     continue
-                if on_avg or cls.is_excluded(ent) or val < cls.threshold:
+                if th_on_avg or cls.is_excluded(ent) or val < cls.threshold:
                     if ent not in cls.tags:
                         cls.tags[ent] = 0.0
                     cls.tags[ent] += val
@@ -388,7 +410,7 @@ class QData:
                 if ent not in cls.keep_tags:
                     if cls.is_excluded(ent):
                         continue
-                    if not on_avg and val < cls.threshold:
+                    if not th_on_avg and val < cls.threshold:
                         continue
                 for_tags_file += ", " + ent
                 count += 1
@@ -412,58 +434,58 @@ class QData:
     def finalize_batch(
         cls,
         in_db,
-        ct: int,
-        on_avg: bool
+        th_on_avg: bool
     ) -> it_ret_tp:
         """ finalize the batch query """
-        if cls.json_db and ct > 0 or cls.had_renames:
+        if cls.json_db and QData.ct > 0 or cls.had_renames:
             cls.write_json()
+
+        print(f'finalizing batch: {QData.ct} interrogations, {len(in_db)} from db')
+        QData.ct += len(in_db)
 
         # collect the weights per file/interrogation of the prior in db stored.
         for index in range(2):
             for ent, lst in cls.weighed[index].items():
                 for i, val in map(get_i_wt, lst):
+                    if val > 1.0:
+                        print(f'ERROR: {ent} {i} {val}')
                     if i in in_db:
                         in_db[i][2+index][ent] = val
 
         # process the retrieved from db and add them to the stats
-        for got in in_db.values():
-            cls.apply_filters(got, '', on_avg)
+        for index, got in in_db.items():
+            # only process the ones that were not in the prior db
+            # the index is the query array index
+
+            cls.apply_filters(got, '', th_on_avg)
 
         # average
-        return cls.finalize(ct + len(in_db), on_avg)
+        return cls.finalize(th_on_avg)
 
     @classmethod
-    def finalize(cls, count: int, on_avg: bool) -> it_ret_tp:
+    def finalize(cls, th_on_avg: bool) -> it_ret_tp:
         """ finalize the query, return the results """
+        # th_on_avg: if true thresholds apply here, not in apply_filters
         tags_str, ratings, tags = '', {}, {}
-
-        def averager(x):
-            return x[0], x[1] / count
 
         js_bool = 'true' if cls.inverse else 'false'
 
-        if on_avg:
+        iter = {k: v / QData.ct for k, v in cls.tags.items()}
+        if th_on_avg:
             if cls.inverse:
-                def inverse_filt(x):
-                    return cls.is_excluded(x[0]) or x[1] < cls.threshold and \
-                           x[0] not in cls.keep_tags
-                iter = filter(inverse_filt, map(averager, cls.tags.items()))
+                iter = {k: w for k, w in iter.items() if cls.is_excluded(k)
+                        or w < cls.threshold and k not in cls.keep_tags}
             else:
-                def filt(x):
-                    return not cls.is_excluded(x[0]) and \
-                           (x[1] >= cls.threshold or x[0] in cls.keep_tags)
-                iter = filter(filt,  map(averager, cls.tags.items()))
-        else:
-            iter = map(averager, cls.tags.items())
+                iter = {k: w for k, w in iter.items() if not cls.is_excluded(k)
+                        and w >= cls.threshold or k in cls.keep_tags}
 
-        for k, already_averaged_val in iter:
+        for k, already_averaged_val in iter.items():
             tags[k] = already_averaged_val
             # trigger an event to place the tag in the active tags list
             tags_str += f""", <a href='javascript:tag_clicked("{k}", {js_bool})'>{k}</a>"""
 
         for ent, val in cls.ratings.items():
-            ratings[ent] = val / count
+            ratings[ent] = val / QData.ct
 
         print('all done :)')
         return (tags_str[2:], ratings, tags, '')

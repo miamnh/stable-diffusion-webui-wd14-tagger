@@ -47,7 +47,7 @@ def split_str(string: str, separator=',') -> List[str]:
 class Interrogator:
     # the raw input and output.
     input = {
-        "cumulative": True,
+        "cumulative": False,
         "large_query": False,
         "unload_after": False,
         "threshold_on_average": False,
@@ -76,6 +76,8 @@ class Interrogator:
             if val != cls.input[key]:
                 if key == 'input_glob' or key == 'output_dir':
                     err = getattr(IOData, "update_" + key)(val)
+                    if key == 'input_glob' and err == '':
+                        QData.reset()
                 else:
                     err = getattr(QData, "update_" + key)(val)
                 if err == '':
@@ -83,6 +85,15 @@ class Interrogator:
             return cls.input[key], err
 
         return setter
+
+    @classmethod
+    def load_image(cls, path: str) -> Image:
+        try:
+            return Image.open(path)
+        except Exception as e:
+            # just in case, user has mysterious file...
+            print(f'${path} is not supported image type: {e}')
+        return None
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -106,9 +117,10 @@ class Interrogator:
         return unloaded
 
     def interrogate_image(self, image: Image) -> it_ret_tp:
-        fi_key = get_file_interrogator_id(image.tobytes(), self.name)
-        if not Interrogator.input["cumulative"]:
-            QData.init_query()
+        sha = IOData.get_bytes_hash(image.tobytes())
+        QData.reset()
+        fi_key = sha + self.name
+        QData.ct = 1
 
         if fi_key in QData.query:
             # this file was already queried for this interrogator.
@@ -123,16 +135,17 @@ class Interrogator:
 
         on_avg = Interrogator.input["threshold_on_average"]
         QData.apply_filters(('', '') + data, fi_key, on_avg)
-        Interrogator.output = QData.finalize(1, on_avg)
+        Interrogator.output = QData.finalize(on_avg)
         return Interrogator.output
 
     def batch_interrogate(
         self,
         batch_rewrite: bool,
     ) -> it_ret_tp:
-        QData.init_query()
         in_db = {}
-        ct = len(QData.query)
+        if not Interrogator.input["cumulative"]:
+            QData.reset()
+        current_queries = len(QData.query)
 
         if Interrogator.input["large_query"] is True and self.run_mode < 2:
             # TODO: write specified tags files instead of simple .txt
@@ -150,21 +163,30 @@ class Interrogator:
 
         for i in tqdm(range(len(IOData.paths)), disable=vb, desc='Tags'):
             # if outputpath is '', no tags file will be written
-            (path, out_path, output_dir) = IOData.paths[i]
-            if output_dir:
-                output_dir.mkdir(0o755, True, True)
-                # next iteration we don't need to create the directory
-                IOData.paths[i][2] = ''
+            if len(IOData.paths[i]) == 5:
+                path, out_path, output_dir, image_hash, image = IOData.paths[i]
+            elif len(IOData.paths[i]) == 4:
+                path, out_path, output_dir, image_hash = IOData.paths[i]
+                image = Interrogator.load_image(path)
+                # should work, we queried before to get the image_hash
+            else:
+                path, out_path, output_dir = IOData.paths[i]
+                image = Interrogator.load_image(path)
+                if image is None:
+                    continue
 
-            try:
-                image = Image.open(path)
-            except Exception as e:
-                # just in case, user has mysterious file...
-                print(f'${path} is not supported image type: {e}')
-                continue
+                image_hash = IOData.get_bytes_hash(image.tobytes())
+                IOData.paths[i].append(image_hash)
+                if Interrogator.input["store_images"]:
+                    IOData.paths[i].append(image)
+
+                if output_dir:
+                    output_dir.mkdir(0o755, True, True)
+                    # next iteration we don't need to create the directory
+                    IOData.paths[i][2] = ''
 
             abspath = str(path.absolute())
-            fi_key = get_file_interrogator_id(image.tobytes(), self.name)
+            fi_key = image_hash + self.name
 
             if fi_key in QData.query:
                 # this file was already queried for this interrogator.
@@ -181,8 +203,8 @@ class Interrogator:
         if Interrogator.input["unload_after"]:
             self.unload()
 
-        ct = len(QData.query) - ct
-        Interrogator.output = QData.finalize_batch(in_db, ct, on_avg)
+        QData.ct += len(QData.query) - current_queries
+        Interrogator.output = QData.finalize_batch(in_db, on_avg)
         return Interrogator.output
 
     def interrogate(
