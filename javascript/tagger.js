@@ -79,7 +79,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // tag-confident labels
         waitQuerySelector('#rating-confidences'),
-        waitQuerySelector('#tag-confidences')
+        waitQuerySelector('#tag-confidences'),
+        waitQuerySelector('#discard-tag-confidences')
     ]).then(elements => {
 
         const $keepTags = elements[0];
@@ -88,6 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const $replaceTags = elements[3];
         const $ratingConfidents = elements[4];
         const $tagConfidents = elements[5];
+        const $discardTagConfidents = elements[6];
 
         let $selectedTextarea = $keepTags;
 
@@ -170,6 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         $tagConfidents.addEventListener('click', onClickLabels)
+        $discardTagConfidents.addEventListener('click', onClickLabels)
 
     }).catch(err => {
         console.error(err)
