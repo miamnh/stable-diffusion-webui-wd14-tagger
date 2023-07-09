@@ -225,15 +225,14 @@ class QData:
 
     @classmethod
     def update_exclude(cls, exclude: str) -> str:
-        exclude = exclude.strip()
+        excl = exclude.strip()
         # first filter empty strings
-        if ',' in exclude:
-            filtered = [x for x in map(str.strip, exclude.split(',')) if x != '']
+        if ',' in excl:
+            filtered = [x for x in map(str.strip, excl.split(',')) if x != '']
             cls.exclude_tags = set(filtered)
             cls.rexcl = None
-        elif exclude != '':
-            cls.rexcl = re_comp('^'+exclude+'$', flags=IGNORECASE)
-        return ''
+        elif excl != '':
+            cls.rexcl = re_comp('^'+excl+'$', flags=IGNORECASE)
 
     @classmethod
     def update_search(cls, search: str) -> str:
@@ -248,10 +247,11 @@ class QData:
 
     @classmethod
     def update_replace(cls, replace: str) -> str:
-        repl_tag_map = [x for x in map(str.strip, replace.split(',')) if x != '']
-        cls.replace_tags = list(repl_tag_map)
-        if cls.re_search is None and len(cls.search_tags) != len(cls.replace_tags):
+        repl = [x for x in map(str.strip, replace.split(',')) if x != '']
+        cls.replace_tags = list(repl)
+        if not cls.re_search and len(cls.search_tags) != len(cls.replace_tags):
             return 'search, replace: unequal len, replacements > 1.'
+        return ''
 
     @classmethod
     def read_json(cls, outdir) -> str:
