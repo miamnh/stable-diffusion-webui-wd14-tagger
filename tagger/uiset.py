@@ -7,7 +7,7 @@ from glob import glob
 from math import ceil
 from hashlib import sha256
 from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
-from json import dumps, loads
+from json import dumps, loads, JSONDecodeError
 from PIL import Image
 from modules import shared
 from modules.deepbooru import re_special as tag_escape_pattern
@@ -263,10 +263,11 @@ class QData:
                 cls.had_renames = False
                 try:
                     data = loads(cls.json_db.read_text())
-                    if any(x not in data for x in ["tag", "rating", "query"]):
-                        raise TypeError
-                except Exception as err:
+                except JSONDecodeError as err:
                     return f'Error reading {cls.json_db}: {repr(err)}'
+                for key in ["tag", "rating", "query"]:
+                    if key not in data:
+                        return f'{cls.json_db}: missing {key} key.'
                 for key in ["add", "keep", "exclude", "search", "replace"]:
                     if key in data:
                         err = getattr(cls, f"update_{key}")(data[key])
