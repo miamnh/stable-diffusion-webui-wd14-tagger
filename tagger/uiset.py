@@ -65,10 +65,10 @@ class IOData:
         return ''
 
     @classmethod
-    def get_bytes_hash(cls, bytes) -> str:
-        """ get sha256 hash of file """
-        # Note: the hash from an image is not the same as from file
-        return sha256(bytes).hexdigest()
+    def get_bytes_hash(cls, data) -> str:
+        """ get sha256 checksum of file """
+        # Note: the checksum from an image is not the same as from file
+        return sha256(data).hexdigest()
 
     @classmethod
     def get_hashes(cls):
