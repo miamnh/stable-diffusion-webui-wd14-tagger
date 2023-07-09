@@ -145,11 +145,11 @@ class IOData:
                 # format output filename
 
                 info = tags_format.Info(path, 'txt')
-                fm = partial(lambda info, m: tags_format.parse(m, info), info)
+                fmt = partial(lambda info, m: tags_format.parse(m, info), info)
 
                 try:
                     formatted_output_filename = tags_format.pattern.sub(
-                        fm,
+                        fmt,
                         Its.output_filename_format
                     )
                 except (TypeError, ValueError) as error:
