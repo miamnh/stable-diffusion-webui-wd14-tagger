@@ -8,11 +8,9 @@ from modules import generation_parameters_copypaste as parameters_copypaste
 from tagger import utils
 from tagger.interrogator import Interrogator as It
 from webui import wrap_gradio_gpu_call
-from tagger.uiset import IOData, QData, it_ret_tp
+from tagger.uiset import IOData, QData, ItRetTP
 from tensorflow import __version__ as tf_version
 from packaging import version
-
-BATCH_REWRITE = 'Update tag lists'
 
 
 def unload_interrogators() -> List[str]:
@@ -26,6 +24,9 @@ def unload_interrogators() -> List[str]:
 
 
 def check_for_errors(name) -> str:
+    if len(It.err) > 0:
+        errors = ', '.join([k.replace('_', ' ') for k in It.err.keys()])
+        return f"Please correct {errors} first"
     if name not in utils.interrogators:
         return f"'{name}': invalid interrogator"
 
@@ -35,7 +36,7 @@ def check_for_errors(name) -> str:
     return ''
 
 
-def on_interrogate(button: str, name: str, inverse=False) -> it_ret_tp:
+def on_interrogate(name: str, inverse=False) -> ItRetTP:
     if It.input["input_glob"] == '':
         return (None, None, None, 'No input directory selected')
 
@@ -45,17 +46,21 @@ def on_interrogate(button: str, name: str, inverse=False) -> it_ret_tp:
 
     it: It = utils.interrogators[name]
     QData.inverse = inverse
-    return it.batch_interrogate(button == BATCH_REWRITE)
+    return it.batch_interrogate()
 
 
-def on_inverse_interrogate(
-    button: str, name: str
-) -> Tuple[str, Dict[str, float], str]:
-    ret = on_interrogate(button, name, True)
+def on_inverse_interrogate(name: str) -> Tuple[str, Dict[str, float], str]:
+    ret = on_interrogate(name, True)
     return (ret[0], ret[2], ret[3])
 
 
-def on_interrogate_image(image: Image, interrogator: str) -> it_ret_tp:
+def on_interrogate_image(image: Image, interrogator: str) -> ItRetTP:
+
+    # FIXME: hack brcause image interrogaion occurs twice
+    # It.odd_increment = It.odd_increment + 1
+    # if It.odd_increment & 1 == 1:
+    #    return (None, None, None, '')
+
     if image is None:
         return (None, None, None, 'No image selected')
     err = check_for_errors(interrogator)
@@ -84,7 +89,7 @@ def move_filter_to_input_fn(
 
     It.input[field] = ', '.join(add)
 
-    ret = on_interrogate(BATCH_REWRITE, name, QData.inverse)
+    ret = on_interrogate(name, QData.inverse)
     return (It.input[field],) + ret
 
 
@@ -114,13 +119,19 @@ def on_tag_search_filter_change(
 
 
 def on_ui_tabs():
+    # If checkboxes misbehave you have to adapt the default.json preset
+
     with gr.Blocks(analytics_enabled=False) as tagger_interface:
         with gr.Row().style(equal_height=False):
             with gr.Column(variant='panel'):
 
                 # input components
                 with gr.Tabs():
-                    with gr.TabItem(label='Single process'):
+                    tab_single_process = gr.TabItem(label='Single process')
+                    tab_batch_from_directory = gr.TabItem(
+                        label='Batch from directory'
+                    )
+                    with tab_single_process:
                         image = gr.Image(
                             label='Source',
                             source='upload',
@@ -132,7 +143,7 @@ def on_ui_tabs():
                             variant='primary'
                         )
 
-                    with gr.TabItem(label='Batch from directory'):
+                    with tab_batch_from_directory:
                         input_glob = utils.preset.component(
                             gr.Textbox,
                             value=It.input["input_glob"],
@@ -147,12 +158,26 @@ def on_ui_tabs():
                                         'to the same path.'
                         )
 
-                        batch_rewrite = gr.Button(value=BATCH_REWRITE)
-
                         batch_submit = gr.Button(
                             value='Interrogate',
                             variant='primary'
                         )
+                        with gr.Row(variant='compact'):
+                            with gr.Column(variant='panel'):
+                                large_query = utils.preset.component(
+                                    gr.Checkbox,
+                                    label='huge batch query (TF 2.10, '
+                                    'experimental)',
+                                    value=False,
+                                    interactive=version.parse(tf_version) ==
+                                    version.parse('2.10')
+                                )
+                            with gr.Column(variant='panel'):
+                                save_tags = utils.preset.component(
+                                    gr.Checkbox,
+                                    label='Save to tags files',
+                                    value=True
+                                )
 
                 info = gr.HTML(
                     label='Info',
@@ -214,52 +239,16 @@ def on_ui_tabs():
                     with gr.Column(variant='compact'):
                         threshold = utils.preset.component(
                             gr.Slider,
-                            label='Threshold',
+                            label='Weight threshold',
                             minimum=0,
                             maximum=1,
                             value=QData.threshold
                         )
                         cumulative = utils.preset.component(
                             gr.Checkbox,
-                            label='combine interrogations',
-                            value=It.input["cumulative"]
+                            label='Combine interrogations',
+                            value=False
                         )
-                        threshold_on_average = utils.preset.component(
-                            gr.Checkbox,
-                            label='threshold applies on average of all images '
-                            'and interrogations',
-                            value=It.input["threshold_on_average"]
-                        )
-                        save_tags = utils.preset.component(
-                            gr.Checkbox,
-                            label='Save to tags files',
-                            value=IOData.save_tags
-                        )
-                    with gr.Column(variant='compact'):
-                        count_threshold = utils.preset.component(
-                            gr.Slider,
-                            label='Tag count threshold',
-                            minimum=1,
-                            maximum=500,
-                            value=QData.count_threshold,
-                            step=1.0
-                        )
-
-                        large_query = utils.preset.component(
-                            gr.Checkbox,
-                            label='huge batch query (tensorflow 2.10, '
-                            'experimental)',
-                            value=It.input["large_query"],
-                            interactive=version.parse(tf_version) ==
-                            version.parse('2.10')
-                        )
-                        unload_after = utils.preset.component(
-                            gr.Checkbox,
-                            label='Unload model after running',
-                            value=It.input["unload_after"]
-                        )
-                with gr.Row(variant='compact'):
-                    with gr.Column(variant='compact'):
                         search_tags = utils.preset.component(
                             gr.Textbox,
                             label='Search tag, .. ->',
@@ -271,6 +260,18 @@ def on_ui_tabs():
                             elem_id='keep-tags'
                         )
                     with gr.Column(variant='compact'):
+                        tag_frac_threshold = utils.preset.component(
+                            gr.Slider,
+                            label='Mininmum fraction for tags',
+                            minimum=0,
+                            maximum=1,
+                            value=QData.tag_frac_threshold,
+                        )
+                        unload_after = utils.preset.component(
+                            gr.Checkbox,
+                            label='Unload model after running',
+                            value=False
+                        )
                         replace_tags = utils.preset.component(
                             gr.Textbox,
                             label='-> Replace tag, ..',
@@ -337,12 +338,12 @@ def on_ui_tabs():
                         )
 
         tab_include.select(fn=wrap_gradio_gpu_call(on_interrogate),
-                           inputs=[batch_rewrite, interrogator],
+                           inputs=[interrogator],
                            outputs=[tags, rating_confidences, tag_confidences,
                                     info])
 
         tab_discard.select(fn=wrap_gradio_gpu_call(on_inverse_interrogate),
-                           inputs=[batch_rewrite, interrogator],
+                           inputs=[interrogator],
                            outputs=[discarded_tags, excluded_tag_confidences,
                                     info])
 
@@ -358,35 +359,26 @@ def on_ui_tabs():
             outputs=[tag_search_selection, exclude_tags, tags,
                      rating_confidences, tag_confidences, info])
 
-        cumulative.input(fn=wrap_gradio_gpu_call(It.flip('cumulative')),
-                         inputs=[], outputs=[info])
-        large_query.input(fn=wrap_gradio_gpu_call(It.flip('large_query')),
-                          inputs=[], outputs=[info])
-        unload_after.input(fn=wrap_gradio_gpu_call(It.flip('unload_after')),
-                           inputs=[], outputs=[info])
-        threshold_on_average.input(fn=wrap_gradio_gpu_call(
-                                   It.flip('threshold_on_average')), inputs=[],
-                                   outputs=[info])
+        cumulative.input(fn=It.flip('cumulative'), inputs=[], outputs=[])
+        large_query.input(fn=It.flip('large_query'), inputs=[], outputs=[])
+        unload_after.input(fn=It.flip('unload_after'), inputs=[], outputs=[])
 
-        save_tags.input(fn=wrap_gradio_gpu_call(IOData.flip_save_tags()),
-                        inputs=[], outputs=[info])
+        save_tags.input(fn=IOData.flip_save_tags(), inputs=[], outputs=[])
 
         input_glob.blur(fn=wrap_gradio_gpu_call(It.set("input_glob")),
                         inputs=[input_glob], outputs=[input_glob, info])
         output_dir.blur(fn=wrap_gradio_gpu_call(It.set("output_dir")),
                         inputs=[output_dir], outputs=[output_dir, info])
 
-        threshold.input(fn=wrap_gradio_gpu_call(QData.set("threshold")),
-                        inputs=[threshold], outputs=[info])
-        threshold.release(fn=wrap_gradio_gpu_call(QData.set("threshold")),
-                          inputs=[threshold], outputs=[info])
+        threshold.input(fn=QData.set("threshold"), inputs=[threshold],
+                        outputs=[])
+        threshold.release(fn=QData.set("threshold"), inputs=[threshold],
+                          outputs=[])
 
-        count_threshold.input(fn=wrap_gradio_gpu_call(
-                              QData.set("count_threshold")),
-                              inputs=[count_threshold], outputs=[info])
-        count_threshold.release(fn=wrap_gradio_gpu_call(
-                                QData.set("count_threshold")),
-                                inputs=[count_threshold], outputs=[info])
+        tag_frac_threshold.input(fn=QData.set("tag_frac_threshold"),
+                                 inputs=[tag_frac_threshold], outputs=[])
+        tag_frac_threshold.release(fn=QData.set("tag_frac_threshold"),
+                                   inputs=[tag_frac_threshold], outputs=[])
 
         add_tags.blur(fn=wrap_gradio_gpu_call(It.set('add')),
                       inputs=[add_tags], outputs=[add_tags, info])
@@ -442,10 +434,9 @@ def on_ui_tabs():
             inputs=[image, interrogator],
             outputs=[tags, rating_confidences, tag_confidences, info])
 
-        for button in [batch_rewrite, batch_submit]:
-            button.click(
-                fn=wrap_gradio_gpu_call(on_interrogate),
-                inputs=[button, interrogator],
-                outputs=[tags, rating_confidences, tag_confidences, info])
+        batch_submit.click(
+            fn=wrap_gradio_gpu_call(on_interrogate),
+            inputs=[interrogator],
+            outputs=[tags, rating_confidences, tag_confidences, info])
 
     return [(tagger_interface, "Tagger", "tagger")]

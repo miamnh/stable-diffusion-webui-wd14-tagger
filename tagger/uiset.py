@@ -8,10 +8,12 @@ from math import ceil
 from hashlib import sha256
 from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
 from json import dumps, loads, JSONDecodeError
+from functools import partial
+from html import escape as html_escape
+from collections import defaultdict
 from PIL import Image
 from modules import shared
 from modules.deepbooru import re_special as tag_escape_pattern
-from functools import partial
 
 from tagger import format as tags_format
 
@@ -26,7 +28,7 @@ supported_extensions = {
 }
 
 # interrogator return type
-it_ret_tp = Tuple[
+ItRetTP = Tuple[
     str,               # tags as string
     Dict[str, float],  # rating confidences
     Dict[str, float],  # tag confidences
@@ -74,14 +76,15 @@ class IOData:
     def get_hashes(cls):
         """ get hashes of all files """
         ret = set()
-        for i in range(len(cls.paths)):
-            if len(cls.paths[i]) == 4:
-                ret.add(cls.paths[i][3])
+        for entries in cls.paths:
+            if len(entries) == 4:
+                ret.add(entries[3])
             else:
-                image = Image.open(cls.paths[i][0])
-                hash = cls.get_bytes_hash(image.tobytes())
-                cls.paths[i].append(hash)
-                ret.add(hash)
+                # if there is no checksum, calculate it
+                image = Image.open(entries[0])
+                checksum = cls.get_bytes_hash(image.tobytes())
+                entries.append(checksum)
+                ret.add(checksum)
         return ret
 
     @classmethod
@@ -195,33 +198,39 @@ class QData:
     replace_tags = []
     re_search = None
     threshold = 0.35
-    count_threshold = 100
+    tag_frac_threshold = 0.05
 
+    # read from db.json, update with what should be written to db.json:
     json_db = None
-    weighed = ({}, {})
+    weighed = (defaultdict(lambda: []), defaultdict(lambda: []))
     query = {}
-    ratings = {}
-    tags = {}
+
+    # representing the (cumulative) current interrogations
+    ratings = defaultdict(lambda: 0.0)
+    tags = defaultdict(lambda: [])
+    in_db = {}
+    for_tags_file = defaultdict(set)
+
     inverse = False
-    had_renames = False
-    ct = 0
+    had_new = False
 
     @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str]]:
         def setter(val) -> Tuple[str]:
             setattr(cls, key, val)
-            return ('',)
         return setter
 
     @classmethod
     def update_keep(cls, keep: str) -> str:
         cls.keep_tags = {x for x in map(str.strip, keep.split(',')) if x != ''}
-        return ''
 
     @classmethod
     def update_add(cls, add: str) -> str:
         cls.add_tags = [x for x in map(str.strip, add.split(',')) if x != '']
-        return ''
+        count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
+        if len(cls.add_tags) > count_threshold:
+            # secretly raise count threshold to avoid issue in apply_filters
+            shared.opts.tagger_count_threshold = len(cls.add_tags)
 
     @classmethod
     def update_exclude(cls, exclude: str) -> str:
@@ -260,7 +269,7 @@ class QData:
         if getattr(shared.opts, 'tagger_auto_serde_json', True):
             cls.json_db = outdir.joinpath('db.json')
             if cls.json_db.is_file():
-                cls.had_renames = False
+                cls.had_new = False
                 try:
                     data = loads(cls.json_db.read_text())
                 except JSONDecodeError as err:
@@ -273,9 +282,13 @@ class QData:
                         err = getattr(cls, f"update_{key}")(data[key])
                         if err:
                             return err
-                cls.weighed = (data["tag"], data["rating"])
+                cls.weighed = (
+                    defaultdict(lambda: [], data["rating"]),
+                    defaultdict(lambda: [], data["tag"])
+                )
                 cls.query = data["query"]
-                print(f'Read {cls.json_db}: {len(cls.query)} interrogations, {len(cls.tags)} tags.')
+                print(f'Read {cls.json_db}: {len(cls.query)} interrogations, '
+                      f'{len(cls.tags)} tags.')
         return ''
 
     @classmethod
@@ -284,8 +297,8 @@ class QData:
         if cls.json_db is not None:
             search = sorted(cls.search_tags.items(), key=lambda x: x[0])
             data = {
-                "tag": cls.weighed[0],
-                "rating": cls.weighed[1],
+                "rating": cls.weighed[0],
+                "tag": cls.weighed[1],
                 "query": cls.query,
                 "add": ','.join(cls.add_tags),
                 "keep": ','.join(cls.keep_tags),
@@ -294,7 +307,8 @@ class QData:
                 "repl": ','.join(cls.replace_tags)
             }
             cls.json_db.write_text(dumps(data, indent=2))
-            print(f'Wrote {cls.json_db}: {len(cls.query)} interrogations, {len(cls.tags)} tags.')
+            print(f'Wrote {cls.json_db}: {len(cls.query)} interrogations, '
+                  f'{len(cls.tags)} tags.')
 
     @classmethod
     def get_index(cls, fi_key: str, path='') -> int:
@@ -303,190 +317,180 @@ class QData:
             if cls.query[fi_key][0] != '':
                 print(f'Dup or rename: Identical checksums for {path}\n'
                       f'and: {cls.query[fi_key][0]} (path updated)')
-                cls.had_renames = True
+                cls.had_new = True
             cls.query[fi_key] = (path, cls.query[fi_key][1])
 
         return cls.query[fi_key][1]
 
     @classmethod
-    def get_single_data(cls, fi_key: str) -> Tuple[Dict[str, float], Dict[str, float]]:
+    def single_data(
+        cls, fi_key: str
+    ) -> Tuple[Dict[str, float], Dict[str, float]]:
         """ get tags and ratings for filestamp-interrogator """
-        index = QData.query.get(fi_key)[1]
-        data = [{}, {}]
+        index = cls.query.get(fi_key)[1]
+        data = ({}, {})
         for j in range(2):
             for ent, lst in cls.weighed[j].items():
                 for i, val in map(get_i_wt, lst):
                     if i == index:
                         data[j][ent] = val
-
-        return tuple(data)
-
-    @classmethod
-    def reset(cls) -> None:
-        cls.tags.clear()
-        cls.ratings.clear()
-        cls.ct = 0
+        QData.in_db[index] = ('', '', '') + data
 
     @classmethod
     def is_excluded(cls, ent: str) -> bool:
         """ check if tag is excluded """
-        return re_match(cls.rexcl, ent) if cls.rexcl else ent in cls.exclude_tags
+        if cls.rexcl:
+            return re_match(cls.rexcl, ent)
+
+        return ent in cls.exclude_tags
 
     @classmethod
-    def apply_filters(
-        cls,
-        data,
-        fi_key: str,
-        th_on_avg: bool,
-    ):
-        """ apply filters to query data, store in db.json if required """
-        # th_on_avg: if true thresholds apply not here but on average rating
-
+    def correct_tag(cls, tag: str) -> str:
+        """ correct tag for display """
         replace_underscore = getattr(shared.opts, 'tagger_repl_us', True)
+        if replace_underscore and tag not in Its.kamojis:
+            tag = tag.replace('_', ' ')
 
-        tags = sorted(data[3].items(), key=lambda x: x[1], reverse=True)
+        if getattr(shared.opts, 'tagger_escape', False):
+            tag = tag_escape_pattern.sub(r'\\\1', tag)
+
+        if cls.re_search:
+            tag = re_sub(cls.re_search, cls.replace_tags[0], tag, 1)
+        elif tag in cls.search_tags:
+            tag = cls.replace_tags[cls.search_tags[tag]]
+
+        return tag
+
+    @classmethod
+    def inverse_apply_filters(cls, tags: List[Tuple[str, float]]) -> None:
+        """ inverse: List all tags marked for exclusion """
+        for tag, val in tags:
+            tag = cls.correct_tag(tag)
+
+            if tag in cls.keep_tags or tag in cls.add_tags:
+                continue
+
+            if cls.is_excluded(tag) or val < cls.threshold:
+                cls.tags[tag].append(val)
+
+    @classmethod
+    def apply_filters(cls, data) -> Set[str]:
+        """ apply filters to query data, store in db.json if required """
+        # fi_key == '' means this is a new file or interrogation for that file
+
+        tags = sorted(data[4].items(), key=lambda x: x[1], reverse=True)
         if cls.inverse:
-            # inverse: display all tags marked for exclusion
-            for ent, val in tags:
-                if replace_underscore and ent not in Its.kamojis:
-                    ent = ent.replace('_', ' ')
-
-                if getattr(shared.opts, 'tagger_escape', False):
-                    ent = tag_escape_pattern.sub(r'\\\1', ent)
-
-                if cls.re_search:
-                    ent = re_sub(cls.re_search, cls.replace_tags[0], ent, 1)
-                elif ent in cls.search_tags:
-                    ent = cls.replace_tags[cls.search_tags[ent]]
-
-                if ent in cls.keep_tags or ent in cls.add_tags:
-                    continue
-                if th_on_avg or cls.is_excluded(ent) or val < cls.threshold:
-                    if ent not in cls.tags:
-                        cls.tags[ent] = 0.0
-                    cls.tags[ent] += val
+            cls.inverse_apply_filters(tags)
             return
 
         # not inverse: display all tags marked for inclusion
-        for_tags_file = ""
-        do_store = fi_key != ''
-        count = 0
-        max_ct = QData.count_threshold - len(cls.add_tags)
-        ratings = sorted(data[2].items(), key=lambda x: x[1], reverse=True)
+
+        fi_key = data[2]
+        index = len(cls.query)
+
+        ratings = sorted(data[3].items(), key=lambda x: x[1], reverse=True)
         # loop over ratings
-        for ent, val in ratings:
-            if do_store:
-                if ent not in cls.weighed[0]:
-                    cls.weighed[0][ent] = []
+        for rating, val in ratings:
+            if fi_key != '':
+                cls.weighed[0][rating].append(val + index)
+            cls.ratings[rating] += val
 
-                cls.weighed[0][ent].append(val + len(cls.query))
-            if ent not in cls.ratings:
-                cls.ratings[ent] = 0.0
-
-            cls.ratings[ent] += val
-
+        count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
+        max_ct = count_threshold - len(cls.add_tags)
+        count = 0
         # loop over tags with db update
-        for ent, val in tags:
-            if isinstance(ent, float):
-                print(f'float: {ent} {val}')
+        for tag, val in tags:
+            if isinstance(tag, float):
+                print(f'bad return from interrogator, float: {tag} {val}')
+                # FIXME: why does this happen? what does it mean?
                 continue
-            if do_store:
-                if val > 0.005:
-                    if ent not in cls.weighed[1]:
-                        cls.weighed[1][ent] = []
 
-                    cls.weighed[1][ent].append(val + len(cls.query))
+            if fi_key != '' and val >= 0.005:
+                cls.weighed[1][tag].append(val + index)
 
             if count < max_ct:
-                if replace_underscore and ent not in Its.kamojis:
-                    ent = ent.replace('_', ' ')
-
-                if getattr(shared.opts, 'tagger_escape', False):
-                    ent = tag_escape_pattern.sub(r'\\\1', ent)
-
-                if cls.re_search:
-                    ent = re_sub(cls.re_search, cls.replace_tags[0], ent, 1)
-                elif ent in cls.search_tags:
-                    ent = cls.replace_tags[cls.search_tags[ent]]
-                if ent not in cls.keep_tags:
-                    if cls.is_excluded(ent):
+                tag = cls.correct_tag(tag)
+                if tag not in cls.keep_tags:
+                    if cls.is_excluded(tag) or val < cls.threshold:
                         continue
-                    if not th_on_avg and val < cls.threshold:
-                        continue
-                for_tags_file += ", " + ent
+                if data[1] != '':
+                    cls.for_tags_file[data[1]].add(tag)
                 count += 1
-            elif not do_store:
+            elif fi_key == '':
                 break
-            cls.tags[ent] = cls.tags[ent] + val if ent in cls.tags else val
+            if tag not in cls.add_tags:
+                # those are already added
+                cls.tags[tag].append(val)
 
         for tag in cls.add_tags:
-            cls.tags[tag] = 1.0
+            if data[1] != '':
+                cls.for_tags_file[data[1]].add(tag)
+            cls.tags[tag] = [1.0 for _ in range(len(cls.query))]
 
         if getattr(shared.opts, 'tagger_verbose', True):
             print(f'{data[0]}: {count}/{len(tags)} tags kept')
 
-        if do_store:
-            cls.query[fi_key] = (data[0], len(cls.query))
-
-        if data[1]:
-            data[1].write_text(for_tags_file[2:], encoding='utf-8')
+        if fi_key != '':
+            cls.query[fi_key] = (data[0], index)
+            # TODO: try unsetting fi_key in in_db
 
     @classmethod
-    def finalize_batch(
-        cls,
-        in_db,
-        th_on_avg: bool
-    ) -> it_ret_tp:
+    def finalize_batch(cls, count: int) -> ItRetTP:
         """ finalize the batch query """
-        if cls.json_db and QData.ct > 0 or cls.had_renames:
+        if cls.json_db and cls.had_new:
             cls.write_json()
-
-        print(f'finalizing batch: {QData.ct} interrogations, {len(in_db)} from db')
-        QData.ct += len(in_db)
+            cls.had_new = False
 
         # collect the weights per file/interrogation of the prior in db stored.
         for index in range(2):
             for ent, lst in cls.weighed[index].items():
                 for i, val in map(get_i_wt, lst):
-                    if val > 1.0:
-                        print(f'ERROR: {ent} {i} {val}')
-                    if i in in_db:
-                        in_db[i][2+index][ent] = val
+                    if i not in cls.in_db:
+                        continue
+                    if ent in cls.in_db[i][3+index]:
+                        raise ValueError(f'ent {ent} already in db: {val} '
+                                         f'vs {cls.in_db[i][3+index][ent]}')
+                    cls.in_db[i][3+index][ent] = val
 
         # process the retrieved from db and add them to the stats
-        for index, got in in_db.items():
-            # only process the ones that were not in the prior db
-            # the index is the query array index
-
-            cls.apply_filters(got, '', th_on_avg)
+        for got in cls.in_db.values():
+            cls.apply_filters(got)
 
         # average
-        return cls.finalize(th_on_avg)
+        return cls.finalize(count)
 
     @classmethod
-    def finalize(cls, th_on_avg: bool) -> it_ret_tp:
+    def finalize(cls, count: int) -> ItRetTP:
         """ finalize the query, return the results """
-        # th_on_avg: if true thresholds apply here, not in apply_filters
+        count += len(cls.in_db)
+        if count == 0:
+            return [None, None, None, 'no results for query']
+
         tags_str, ratings, tags = '', {}, {}
 
         js_bool = 'true' if cls.inverse else 'false'
 
-        iter = {k: v / QData.ct for k, v in cls.tags.items()}
-        if th_on_avg:
-            if cls.inverse:
-                iter = {k: w for k, w in iter.items() if cls.is_excluded(k)
-                        or w < cls.threshold and k not in cls.keep_tags}
-            else:
-                iter = {k: w for k, w in iter.items() if not cls.is_excluded(k)
-                        and w >= cls.threshold or k in cls.keep_tags}
+        for k, lst in cls.tags.items():
+            # len(!) fraction of the all interrogations was above the threshold
+            fraction_of_queries = len(lst) / count
 
-        for k, already_averaged_val in iter.items():
-            tags[k] = already_averaged_val
-            # trigger an event to place the tag in the active tags list
-            tags_str += f""", <a href='javascript:tag_clicked("{k}", {js_bool})'>{k}</a>"""
+            if fraction_of_queries >= cls.tag_frac_threshold:
+                # store the average of those interrogations sum(!) / count
+                tags[k] = sum(lst) / count
+                # trigger an event to place the tag in the active tags list
+                # replace if k interferes with html code
+                escaped = html_escape(k)
+                tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
+                            f"""{js_bool})'>{escaped}</a>"""
+            else:
+                for remaining_tags in cls.for_tags_file.values():
+                    remaining_tags.discard(k)
 
         for ent, val in cls.ratings.items():
-            ratings[ent] = val / QData.ct
+            ratings[ent] = val / count
+
+        for file, remaining_tags in cls.for_tags_file.items():
+            file.write_text(', '.join(remaining_tags), encoding='utf-8')
 
         print('all done :)')
         return (tags_str[2:], ratings, tags, '')

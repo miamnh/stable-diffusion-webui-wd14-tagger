@@ -14,7 +14,7 @@ from modules import shared
 
 from . import dbimutils
 from tagger import settings
-from tagger.uiset import QData, IOData, it_ret_tp
+from tagger.uiset import QData, IOData, ItRetTP
 
 Its = settings.InterrogatorSettings
 
@@ -31,7 +31,7 @@ else:
         try:
             TF_DEVICE_NAME = f'/gpu:{int(shared.cmd_opts.device_id)}'
         except ValueError:
-            print('--device-id is not a integer')
+            print('--device-id is not an integer')
 
 
 def get_file_interrogator_id(bytes, interrogator_name):
@@ -50,7 +50,6 @@ class Interrogator:
         "cumulative": False,
         "large_query": False,
         "unload_after": False,
-        "threshold_on_average": False,
         "add": '',
         "keep": '',
         "exclude": '',
@@ -61,28 +60,36 @@ class Interrogator:
         "output_dir": '',
     }
     output = None
+    err = {}
+    odd_increment = 0
 
     @classmethod
     def flip(cls, key):
         def toggle():
             cls.input[key] = not cls.input[key]
-            return ('',)
         return toggle
 
     @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str, str]]:
         def setter(val) -> Tuple[str, str]:
+            if key in cls.err:
+                del cls.err[key]
             err = ''
             if val != cls.input[key]:
                 if key == 'input_glob' or key == 'output_dir':
                     err = getattr(IOData, "update_" + key)(val)
                     if key == 'input_glob' and err == '':
-                        QData.reset()
+                        QData.tags.clear()
+                        QData.ratings.clear()
+                        QData.in_db.clear()
                 else:
                     err = getattr(QData, "update_" + key)(val)
-                if err == '':
-                    cls.input[key] = val
-            return cls.input[key], err
+                if err:
+                    cls.err[key] = err
+                else:
+                    err = ''
+                cls.input[key] = val
+            return (cls.input[key], err)
 
         return setter
 
@@ -116,36 +123,41 @@ class Interrogator:
 
         return unloaded
 
-    def interrogate_image(self, image: Image) -> it_ret_tp:
+    def interrogate_image(self, image: Image) -> ItRetTP:
         sha = IOData.get_bytes_hash(image.tobytes())
-        QData.reset()
+        QData.tags.clear()
+        QData.ratings.clear()
+        if not Interrogator.input["cumulative"]:
+            QData.in_db.clear()
         fi_key = sha + self.name
-        QData.ct = 1
+        ct = 0
+        QData.for_tags_file.clear()
 
         if fi_key in QData.query:
             # this file was already queried for this interrogator.
-            data = QData.get_single_data(fi_key)
-            # clear: the data does not require storage
-            fi_key = ""
+            QData.single_data(fi_key)
         else:
             # single process
-            data = self.interrogate(image)
+            ct += 1
+            data = ('', '', fi_key) + self.interrogate(image)
+            # When drag-dropping an image, the path [0] is not known
             if Interrogator.input["unload_after"]:
                 self.unload()
 
-        on_avg = Interrogator.input["threshold_on_average"]
-        QData.apply_filters(('', '') + data, fi_key, on_avg)
-        Interrogator.output = QData.finalize(on_avg)
+            QData.query[fi_key] = ('', len(QData.query))
+            QData.apply_filters(data)
+
+        for got in QData.in_db.values():
+            QData.apply_filters(got)
+
+        Interrogator.output = QData.finalize(ct)
         return Interrogator.output
 
-    def batch_interrogate(
-        self,
-        batch_rewrite: bool,
-    ) -> it_ret_tp:
-        in_db = {}
+    def batch_interrogate(self) -> ItRetTP:
+        QData.tags.clear()
+        QData.ratings.clear()
         if not Interrogator.input["cumulative"]:
-            QData.reset()
-        current_queries = len(QData.query)
+            QData.in_db.clear()
 
         if Interrogator.input["large_query"] is True and self.run_mode < 2:
             # TODO: write specified tags files instead of simple .txt
@@ -155,11 +167,11 @@ class Interrogator:
                 return (None, None, None, err)
 
             self.run_mode = (self.run_mode + 1) % 2
-            Interrogator.output = QData.finalize(len(image_list))
+            Interrogator.output = QData.finalize()
             return Interrogator.output
 
         vb = getattr(shared.opts, 'tagger_verbose', True)
-        on_avg = Interrogator.input["threshold_on_average"]
+        ct = len(QData.query)
 
         for i in tqdm(range(len(IOData.paths)), disable=vb, desc='Tags'):
             # if outputpath is '', no tags file will be written
@@ -177,7 +189,7 @@ class Interrogator:
 
                 image_hash = IOData.get_bytes_hash(image.tobytes())
                 IOData.paths[i].append(image_hash)
-                if Interrogator.input["store_images"]:
+                if getattr(shared.opts, 'tagger_store_images', False):
                     IOData.paths[i].append(image)
 
                 if output_dir:
@@ -191,20 +203,19 @@ class Interrogator:
             if fi_key in QData.query:
                 # this file was already queried for this interrogator.
                 index = QData.get_index(fi_key, abspath)
-                in_db[index] = [abspath, out_path, {}, {}]
-
-            elif batch_rewrite:
-                # with batch rewrite we only read from database
-                print(f'new file {abspath}: requires interrogation (skipped)')
+                # this file was already queried and stored
+                QData.in_db[index] = (abspath, out_path, '', {}, {})
             else:
-                data = (abspath, out_path) + self.interrogate(image)
-                QData.apply_filters(data, fi_key, on_avg)
+                data = (abspath, out_path, fi_key) + self.interrogate(image)
+                QData.apply_filters(data)
+                QData.had_new = True
+
 
         if Interrogator.input["unload_after"]:
             self.unload()
 
-        QData.ct += len(QData.query) - current_queries
-        Interrogator.output = QData.finalize_batch(in_db, on_avg)
+        ct = len(QData.query) - ct
+        Interrogator.output = QData.finalize_batch(ct)
         return Interrogator.output
 
     def interrogate(

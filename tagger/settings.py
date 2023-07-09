@@ -1,10 +1,16 @@
 from modules import shared
 from typing import List
+from gradio import inputs as gr
 
 # kaomoji from WD 1.4 tagger csv. thanks, Meow-San#5400!
 DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, 3_3, 6_9, >_o, @_@, ^_^, o_o, u_u, x_x, |_|, ||_||'
 
 DEFAULT_OFF = '[name].[output_extension]'
+
+
+def slider_wrapper(value, elem_id, **kwargs):
+    # required or else gradio will throw errors
+    return gr.Slider(**kwargs)
 
 
 def on_ui_settings():
@@ -24,6 +30,18 @@ def on_ui_settings():
         key='tagger_out_filename_fmt',
         func=Its.set_output_filename_format
     )
+
+    shared.opts.add_option(
+        key='tagger_count_threshold',
+        info=shared.OptionInfo(
+            100.0,
+            label="Maximum number of tags to be shown in the UI",
+            section=section,
+            component=slider_wrapper,
+            component_args={"minimum": 1.0, "maximum": 500.0, "step": 1.0},
+        ),
+    )
+
     shared.opts.add_option(
         key='tagger_batch_recursive',
         info=shared.OptionInfo(
@@ -32,12 +50,19 @@ def on_ui_settings():
             section=section,
         ),
     )
-
     shared.opts.add_option(
         key='tagger_auto_serde_json',
         info=shared.OptionInfo(
             True,
             label='Auto load and save JSON database',
+            section=section,
+        ),
+    )
+    shared.opts.add_option(
+        key='tagger_store_images',
+        info=shared.OptionInfo(
+            False,
+            label='Store images in database',
             section=section,
         ),
     )
