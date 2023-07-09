@@ -6,20 +6,14 @@
 # you have to manually run remove_instructions.sh to remove the files
 # this script requires exiftool and feh
 # TODO: implement this in the extension
+#
+# Usage:
+# repo_dir=/path/to/repo
+# cd /path/to/images
+#
 
-ls -1 *.txt | while read f; do
-  sed 's/, /\n/g' "$f" | sort | tr '\n' ',' | sed "s~,$~\t$f\n~"
-done | sort | awk -F'\t' '{
-  a[$1] = a[$1] == "" ? $2 : a[$1]"\t"$2;
-} END {
-  for (i in a) {
-    if (index(a[i], "\t") != 0) {
-      print a[i]"\t"i;
-    }
-  }
-}' > ../ff_dedup.txt
-
-while read first_file second_file etc; do
+# use tabs as field separator
+while read -r -d '\t' first_file second_file etc; do
   # images may be jpg jpeg or png
   first_image=$(basename "$first_file" ".txt")
   if [[ -f "$first_image.jpg" ]]; then
@@ -80,7 +74,15 @@ while read first_file second_file etc; do
     echo rm "$first_file" "$first_image"
   fi
   kill $pid1 $pid2
-done < <(cat ../ff_dedup.txt) > remove_instructions.sh
-
-
-
+done < <(
+ls -1 *.txt | while read f; do
+  sed 's/, /\n/g' "$f" | sort | tr '\n' ',' | sed "s~,$~\t$f\n~"
+done | sort | awk -F'\t' '{
+  a[$1] = a[$1] == "" ? $2 : a[$1]"\t"$2;
+} END {
+  for (i in a) {
+    if (index(a[i], "\t") != 0) {
+      print a[i];
+    }
+  }
+}') > remove_instructions.sh
