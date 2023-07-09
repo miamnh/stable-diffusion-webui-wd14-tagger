@@ -432,7 +432,6 @@ class QData:
 
         if fi_key != '':
             cls.query[fi_key] = (data[0], index)
-            # TODO: try unsetting fi_key in in_db
 
     @classmethod
     def finalize_batch(cls, count: int) -> ItRetTP:
@@ -447,9 +446,6 @@ class QData:
                 for i, val in map(get_i_wt, lst):
                     if i not in cls.in_db:
                         continue
-                    if ent in cls.in_db[i][3+index]:
-                        raise ValueError(f'ent {ent} already in db: {val} '
-                                         f'vs {cls.in_db[i][3+index][ent]}')
                     cls.in_db[i][3+index][ent] = val
 
         # process the retrieved from db and add them to the stats

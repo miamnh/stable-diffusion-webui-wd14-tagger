@@ -121,6 +121,10 @@ def on_tag_search_filter_change(
 def on_ui_tabs():
     # If checkboxes misbehave you have to adapt the default.json preset
 
+    # FIXME: sliders misbehave: do not always pass the right value
+    # FIXME: Textbox does not always pass the right value
+    # FIXME: on exlusion tab the tag click does not work in the percentages box
+
     with gr.Blocks(analytics_enabled=False) as tagger_interface:
         with gr.Row().style(equal_height=False):
             with gr.Column(variant='panel'):
