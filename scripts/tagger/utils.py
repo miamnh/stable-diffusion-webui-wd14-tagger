@@ -6,7 +6,8 @@ from pathlib import Path
 from modules import shared, scripts
 from preload import default_ddp_path, default_onnx_path
 from tagger.preset import Preset
-from tagger.interrogator import Interrogator, DeepDanbooruInterrogator, WaifuDiffusionInterrogator
+from tagger.interrogator import Interrogator, DeepDanbooruInterrogator
+from tagger.interrogator import WaifuDiffusionInterrogator
 
 preset = Preset(Path(scripts.basedir(), 'presets'))
 
@@ -14,6 +15,7 @@ interrogators: Dict[str, Interrogator] = {}
 
 
 def refresh_interrogators() -> List[str]:
+    """Refreshes the interrogators list"""
     global interrogators
     interrogators = {
         'wd14-convnextv2-v2': WaifuDiffusionInterrogator(
@@ -73,7 +75,8 @@ def refresh_interrogators() -> List[str]:
 
     # load deepdanbooru project
     os.makedirs(
-        getattr(shared.cmd_opts, 'deepdanbooru_projects_path', default_ddp_path),
+        getattr(shared.cmd_opts, 'deepdanbooru_projects_path',
+                default_ddp_path),
         exist_ok=True
     )
     os.makedirs(
@@ -111,13 +114,14 @@ def refresh_interrogators() -> List[str]:
             continue
 
         def tag_select_csvs_up_front(k):
-            sum([-1 if t in k.name.lower() else 1 for t in ["tag", "select"]])
+            sum(-1 if t in k.name.lower() else 1 for t in ["tag", "select"])
 
         csv.sort(key=tag_select_csvs_up_front)
         tags_path = Path(path, csv[0])
 
         if path.name not in interrogators:
-            raise NotImplementedError(f"Add {path.name} model to interrogators dict in tagger/utils.py")
+            raise NotImplementedError(f"Add {path.name} model to interrogators"
+                                      " dict in tagger/utils.py")
 
         interrogators[path.name].model_path = model_path
         interrogators[path.name].tags_path = tags_path
@@ -125,5 +129,5 @@ def refresh_interrogators() -> List[str]:
     return sorted(interrogators.keys())
 
 
-def split_str(s: str, separator=',') -> List[str]:
-    return [x.strip() for x in s.split(separator) if x]
+def split_str(string: str, separator=',') -> List[str]:
+    return [x.strip() for x in string.split(separator) if x]
