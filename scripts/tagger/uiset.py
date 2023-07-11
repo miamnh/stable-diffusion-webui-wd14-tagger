@@ -196,7 +196,6 @@ class QData:
     rexcl = None
     search_tags = {}
     replace_tags = []
-    re_search = None
     threshold = 0.35
     tag_frac_threshold = 0.05
 
@@ -245,12 +244,18 @@ class QData:
 
     @classmethod
     def update_search(cls, search: str) -> str:
-        search = [x for x in map(str.strip, search.split(',')) if x != '']
+        search = []
+        for x in map(str.strip, search.split(',')):
+            if x != '':
+                if x[0] == '^' and x[-1] == '$':
+                    search.append(re_comp(x, flags=IGNORECASE))
+                else:
+                    search.append(re_comp('^'+x+'$', flags=IGNORECASE))
+
         cls.search_tags = dict(enumerate(search))
         slen = len(cls.search_tags)
-        if len(cls.search_tags) == 1:
-            cls.re_search = re_comp('^'+search[0]+'$', flags=IGNORECASE)
-        elif slen != len(cls.replace_tags):
+
+        if slen != len(cls.replace_tags):
             return 'search, replace: unequal len, replacements > 1.'
         return ''
 
@@ -258,7 +263,7 @@ class QData:
     def update_replace(cls, replace: str) -> str:
         repl = [x for x in map(str.strip, replace.split(',')) if x != '']
         cls.replace_tags = list(repl)
-        if not cls.re_search and len(cls.search_tags) != len(cls.replace_tags):
+        if len(cls.search_tags) != len(cls.replace_tags):
             return 'search, replace: unequal len, replacements > 1.'
         return ''
 
@@ -354,10 +359,11 @@ class QData:
         if getattr(shared.opts, 'tagger_escape', False):
             tag = tag_escape_pattern.sub(r'\\\1', tag)
 
-        if cls.re_search:
-            tag = re_sub(cls.re_search, cls.replace_tags[0], tag, 1)
-        elif tag in cls.search_tags:
-            tag = cls.replace_tags[cls.search_tags[tag]]
+        for i, regex in cls.search_tags.items():
+            if re_match(regex, tag):
+                tag = re_sub(regex, cls.replace_tags[i], tag,
+                             count=1, flags=IGNORECASE)
+                break
 
         return tag
 
