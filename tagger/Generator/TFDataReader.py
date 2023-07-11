@@ -5,6 +5,7 @@ import tensorflow_io as tfio
 
 
 def is_webp(contents):
+    """Checks if the image is a webp image"""
     riff_header = tf.strings.substr(contents, 0, 4)
     webp_header = tf.strings.substr(contents, 8, 4)
 
@@ -14,6 +15,7 @@ def is_webp(contents):
 
 
 class DataGenerator:
+    """ Data generator for the dataset """
     def __init__(self, file_list, target_height, target_width, batch_size):
         self.file_list = file_list
         self.target_width = target_width
@@ -25,11 +27,13 @@ class DataGenerator:
         return filename, image_bytes
 
     def parse_single_image(self, filename, image_bytes):
+        """ Parses a single image """
         if is_webp(image_bytes):
             image = tfio.image.decode_webp(image_bytes)
         else:
             image = tf.io.decode_image(
-                image_bytes, channels=0, dtype=tf.uint8, expand_animations=False
+                image_bytes, channels=0, dtype=tf.uint8,
+                expand_animations=False
             )
 
         # Black and white image
@@ -52,7 +56,7 @@ class DataGenerator:
 
             matte = tf.ones_like(image, dtype=tf.uint8) * [255, 255, 255, 255]
 
-            weighted_matte = tf.cast(matte, dtype=alpha_mask.dtype) * (1 - alpha_mask)
+            weighted_matte = tf.cast(matte, dtype=alpha_mask.dtype) *(1 - alpha_mask)
             weighted_image = tf.cast(image, dtype=alpha_mask.dtype) * alpha_mask
             image = weighted_image + weighted_matte
 
@@ -64,9 +68,10 @@ class DataGenerator:
         return filename, image
 
     def resize_single_image(self, filename, image):
-        h, w, _ = tf.unstack(tf.shape(image))
+        """ Resizes a single image """
+        height, width, _ = tf.unstack(tf.shape(image))
 
-        if h <= self.target_height and w <= self.target_width:
+        if height <= self.target_height and width <= self.target_width:
             return filename, image
 
         image = tf.image.resize(
@@ -79,23 +84,26 @@ class DataGenerator:
         return filename, image
 
     def pad_single_image(self, filename, image):
-        h, w, _ = tf.unstack(tf.shape(image))
+        """ Pads a single image """
+        height, width, _ = tf.unstack(tf.shape(image))
 
-        float_h = tf.cast(h, dtype=tf.float32)
-        float_w = tf.cast(w, dtype=tf.float32)
+        float_h = tf.cast(height, dtype=tf.float32)
+        float_w = tf.cast(width, dtype=tf.float32)
         float_target_h = tf.cast(self.target_height, dtype=tf.float32)
         float_target_w = tf.cast(self.target_width, dtype=tf.float32)
 
         padding_top = tf.cast((float_target_h - float_h) / 2, dtype=tf.int32)
         padding_right = tf.cast((float_target_w - float_w) / 2, dtype=tf.int32)
-        padding_bottom = self.target_height - padding_top - h
-        padding_left = self.target_width - padding_right - w
+        padding_bottom = self.target_height - padding_top - height
+        padding_left = self.target_width - padding_right - width
 
-        padding = [[padding_top, padding_bottom], [padding_right, padding_left], [0, 0]]
+        padding = [[padding_top, padding_bottom],
+                   [padding_right, padding_left], [0, 0]]
         image = tf.pad(image, padding, mode="CONSTANT", constant_values=255)
         return filename, image
 
     def genDS(self):
+        """ Generates the dataset """
         images_list = tf.data.Dataset.from_tensor_slices(self.file_list)
 
         images_data = images_list.map(
@@ -112,7 +120,8 @@ class DataGenerator:
         )
 
         images_list = images_data.batch(
-            self.batch_size, drop_remainder=False, num_parallel_calls=tf.data.AUTOTUNE
+            self.batch_size, drop_remainder=False,
+            num_parallel_calls=tf.data.AUTOTUNE
         )
         images_list = images_list.prefetch(tf.data.AUTOTUNE)
         return images_list
