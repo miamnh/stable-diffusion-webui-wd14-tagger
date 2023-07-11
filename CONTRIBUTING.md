@@ -63,7 +63,7 @@ Use [GitHub-flavored Markdown](https://guides.github.com/features/mastering-mark
 Thank you for your interest in contributing to this project!
 
 # License
-[MIT](https://choosealicense.com/licenses/mit/)
+Largely public domain, I think tagger/dbimutils,py was [MIT](https://choosealicense.com/licenses/mit/)
 
 # Questions
 If you have any questions about the repo, open an issue or contact me directly at [email](mailto:pi.co.0o.byte@gmail.com).
