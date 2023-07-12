@@ -1,3 +1,4 @@
+# Purpose: Pydantic models for the API."""
 from typing import List, Dict
 
 from modules.api import models as sd_models
@@ -5,6 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class TaggerInterrogateRequest(sd_models.InterrogateRequest):
+    """Interrogate request model"""
     model: str = Field(
         title='Model',
         description='The interrogate model used.'
@@ -20,6 +22,7 @@ class TaggerInterrogateRequest(sd_models.InterrogateRequest):
 
 
 class TaggerInterrogateResponse(BaseModel):
+    """Interrogate response model"""
     caption: Dict[str, float] = Field(
         title='Caption',
         description='The generated caption for the image.'
@@ -27,6 +30,7 @@ class TaggerInterrogateResponse(BaseModel):
 
 
 class InterrogatorsResponse(BaseModel):
+    """Interrogators response model"""
     models: List[str] = Field(
         title='Models',
         description=''

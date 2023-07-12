@@ -1,11 +1,12 @@
+""" Interrogator class and subclasses for tagger """
 import os
 from pathlib import Path
 from io import BytesIO
 from hashlib import sha256
 import json
-from pandas import read_csv, read_json
-from PIL import Image
 from typing import Tuple, List, Dict, Callable
+from pandas import read_csv, read_json
+from PIL import Image, UnidentifiedImageError
 from numpy import asarray, float32, expand_dims
 from tqdm import tqdm
 
@@ -34,9 +35,9 @@ else:
             print('--device-id is not an integer')
 
 
-def get_file_interrogator_id(bytes, interrogator_name):
+def get_file_interrogator_id(buf, interrogator_name):
     hasher = sha256()
-    hasher.update(bytes)
+    hasher.update(buf)
     return str(hasher.hexdigest()) + interrogator_name
 
 
@@ -45,6 +46,7 @@ def split_str(string: str, separator=',') -> List[str]:
 
 
 class Interrogator:
+    """ Interrogator class for tagger """
     # the raw input and output.
     input = {
         "cumulative": False,
@@ -76,7 +78,7 @@ class Interrogator:
                 del cls.err[key]
             err = ''
             if val != cls.input[key]:
-                if key == 'input_glob' or key == 'output_dir':
+                if key not in {'input_glob', 'output_dir'}:
                     err = getattr(IOData, "update_" + key)(val)
                     if key == 'input_glob' and err == '':
                         QData.tags.clear()
@@ -97,24 +99,35 @@ class Interrogator:
     def load_image(cls, path: str) -> Image:
         try:
             return Image.open(path)
-        except Exception as e:
+        except FileNotFoundError:
+            print(f'${path} not found')
+        except UnidentifiedImageError:
             # just in case, user has mysterious file...
-            print(f'${path} is not supported image type: {e}')
+            print(f'${path} is not a  supported image type')
+        except ValueError:
+            print(f'${path} is not readable or StringIO')
         return None
 
     def __init__(self, name: str) -> None:
         self.name = name
+        self.model = None
         # run_mode 0 is dry run, 1 means run (alternating), 2 means disabled
         self.run_mode = 0 if hasattr(self, "large_batch_interrogate") else 2
 
     def load(self):
         raise NotImplementedError()
 
+    def large_batch_interrogate(
+        self, images: List, dry_run=False
+    ) -> List[ItRetTP]:
+        raise NotImplementedError()
+
     def unload(self) -> bool:
         unloaded = False
 
-        if hasattr(self, 'model') and self.model is not None:
+        if self.model is not None:
             del self.model
+            self.model = None
             unloaded = True
             print(f'Unloaded {self.name}')
 
@@ -130,7 +143,7 @@ class Interrogator:
         if not Interrogator.input["cumulative"]:
             QData.in_db.clear()
         fi_key = sha + self.name
-        ct = 0
+        count = 0
         QData.for_tags_file.clear()
 
         if fi_key in QData.query:
@@ -138,7 +151,7 @@ class Interrogator:
             QData.single_data(fi_key)
         else:
             # single process
-            ct += 1
+            count += 1
             data = ('', '', fi_key) + self.interrogate(image)
             # When drag-dropping an image, the path [0] is not known
             if Interrogator.input["unload_after"]:
@@ -150,10 +163,48 @@ class Interrogator:
         for got in QData.in_db.values():
             QData.apply_filters(got)
 
-        Interrogator.output = QData.finalize(ct)
+        Interrogator.output = QData.finalize(count)
         return Interrogator.output
 
+    def batch_interrogate_image(self, index: int) -> None:
+        # if outputpath is '', no tags file will be written
+        if len(IOData.paths[index]) == 5:
+            path, out_path, output_dir, image_hash, image = IOData.paths[index]
+        elif len(IOData.paths[index]) == 4:
+            path, out_path, output_dir, image_hash = IOData.paths[index]
+            image = Interrogator.load_image(path)
+            # should work, we queried before to get the image_hash
+        else:
+            path, out_path, output_dir = IOData.paths[index]
+            Interrogator.load_image(path)
+            if image is None:
+                return
+
+            image_hash = IOData.get_bytes_hash(image.tobytes())
+            IOData.paths[index].append(image_hash)
+            if getattr(shared.opts, 'tagger_store_images', False):
+                IOData.paths[index].append(image)
+
+            if output_dir:
+                output_dir.mkdir(0o755, True, True)
+                # next iteration we don't need to create the directory
+                IOData.paths[index][2] = ''
+
+        abspath = str(path.absolute())
+        fi_key = image_hash + self.name
+
+        if fi_key in QData.query:
+            # this file was already queried for this interrogator.
+            i = QData.get_index(fi_key, abspath)
+            # this file was already queried and stored
+            QData.in_db[i] = (abspath, out_path, '', {}, {})
+        else:
+            data = (abspath, out_path, fi_key) + self.interrogate(image)
+            QData.apply_filters(data)
+            QData.had_new = True
+
     def batch_interrogate(self) -> ItRetTP:
+        """ Interrogate all images in the input list """
         QData.tags.clear()
         QData.ratings.clear()
         if not Interrogator.input["cumulative"]:
@@ -166,56 +217,22 @@ class Interrogator:
             if err:
                 return (None, None, None, err)
 
+            # alternating dry run and run modes
             self.run_mode = (self.run_mode + 1) % 2
             Interrogator.output = QData.finalize()
             return Interrogator.output
 
-        vb = getattr(shared.opts, 'tagger_verbose', True)
-        ct = len(QData.query)
+        verbose = getattr(shared.opts, 'tagger_verbose', True)
+        count = len(QData.query)
 
-        for i in tqdm(range(len(IOData.paths)), disable=vb, desc='Tags'):
-            # if outputpath is '', no tags file will be written
-            if len(IOData.paths[i]) == 5:
-                path, out_path, output_dir, image_hash, image = IOData.paths[i]
-            elif len(IOData.paths[i]) == 4:
-                path, out_path, output_dir, image_hash = IOData.paths[i]
-                image = Interrogator.load_image(path)
-                # should work, we queried before to get the image_hash
-            else:
-                path, out_path, output_dir = IOData.paths[i]
-                image = Interrogator.load_image(path)
-                if image is None:
-                    continue
-
-                image_hash = IOData.get_bytes_hash(image.tobytes())
-                IOData.paths[i].append(image_hash)
-                if getattr(shared.opts, 'tagger_store_images', False):
-                    IOData.paths[i].append(image)
-
-                if output_dir:
-                    output_dir.mkdir(0o755, True, True)
-                    # next iteration we don't need to create the directory
-                    IOData.paths[i][2] = ''
-
-            abspath = str(path.absolute())
-            fi_key = image_hash + self.name
-
-            if fi_key in QData.query:
-                # this file was already queried for this interrogator.
-                index = QData.get_index(fi_key, abspath)
-                # this file was already queried and stored
-                QData.in_db[index] = (abspath, out_path, '', {}, {})
-            else:
-                data = (abspath, out_path, fi_key) + self.interrogate(image)
-                QData.apply_filters(data)
-                QData.had_new = True
-
+        for i in tqdm(range(len(IOData.paths)), disable=verbose, desc='Tags'):
+            self.batch_interrogate_image(i)
 
         if Interrogator.input["unload_after"]:
             self.unload()
 
-        ct = len(QData.query) - ct
-        Interrogator.output = QData.finalize_batch(ct)
+        count = len(QData.query) - count
+        Interrogator.output = QData.finalize_batch(count)
         return Interrogator.output
 
     def interrogate(
@@ -229,9 +246,11 @@ class Interrogator:
 
 
 class DeepDanbooruInterrogator(Interrogator):
+    """ Interrogator for DeepDanbooru models """
     def __init__(self, name: str, project_path: os.PathLike) -> None:
         super().__init__(name)
         self.project_path = project_path
+        self.tags = None
 
     def load(self) -> None:
         print(f'Loading {self.name} from {str(self.project_path)}')
@@ -257,8 +276,8 @@ class DeepDanbooruInterrogator(Interrogator):
         for device in tf.config.experimental.list_physical_devices('GPU'):
             try:
                 tf.config.experimental.set_memory_growth(device, True)
-            except RuntimeError as e:
-                print(e)
+            except RuntimeError as err:
+                print(err)
 
         with tf.device(TF_DEVICE_NAME):
             import deepdanbooru.project as ddp
@@ -336,6 +355,7 @@ class DeepDanbooruInterrogator(Interrogator):
 
 
 class WaifuDiffusionInterrogator(Interrogator):
+    """ Interrogator for Waifu Diffusion models """
     def __init__(
         self,
         name: str,
@@ -346,14 +366,19 @@ class WaifuDiffusionInterrogator(Interrogator):
         super().__init__(name)
         self.model_path = model_path
         self.tags_path = tags_path
+        self.tags = None
         self.kwargs = kwargs
 
     def download(self) -> Tuple[os.PathLike, os.PathLike]:
         print(f"Loading {self.name} model file from {self.kwargs['repo_id']}")
 
         mdir = Path(shared.models_path, 'interrogators')
-        model_path = Path(hf_hub_download(**self.kwargs, filename=self.model_path, cache_dir=mdir))
-        tags_path = Path(hf_hub_download(**self.kwargs, filename=self.tags_path, cache_dir=mdir))
+        model_path = Path(hf_hub_download(**self.kwargs,
+                                          filename=self.model_path,
+                                          cache_dir=mdir))
+        tags_path = Path(hf_hub_download(**self.kwargs,
+                                         filename=self.tags_path,
+                                         cache_dir=mdir))
 
         download_model = {
             'name': self.name,
@@ -363,19 +388,19 @@ class WaifuDiffusionInterrogator(Interrogator):
         mpath = Path(mdir, 'model.json')
 
         if not os.path.exists(mdir):
-            os.makedir(mdir)
+            os.mkdir(mdir)
 
         elif os.path.exists(mpath):
-            with open(mpath, 'r') as f:
+            with os.open(mpath, 'r') as filename:
                 try:
-                    data = json.load(f)
+                    data = json.load(filename)
                     data.append(download_model)
-                except Exception as e:
-                    print(f'Adding download_model {mpath} raised {repr(e)}')
+                except json.JSONDecodeError as err:
+                    print(f'Adding download_model {mpath} raised {repr(err)}')
                     data = [download_model]
 
-        with open(mpath, 'w') as f:
-            json.dump(data, f)
+        with os.open(mpath, 'w') as filename:
+            json.dump(data, filename)
 
         return model_path, tags_path
 
@@ -474,13 +499,62 @@ class WaifuDiffusionInterrogator(Interrogator):
 
         return ratings, tags
 
-    def large_batch_interrogate(self, images_list, dry_run=True) -> str:
+    def dry_run(self, images) -> Tuple[str, Callable[[str], None]]:
+
+        def process_images(filepaths, _):
+            lines = []
+            for image_path in filepaths:
+                image_path = image_path.numpy().decode("utf-8")
+                lines.append(f"{image_path}\n")
+            with os.open("dry_run_read.txt", "a") as filename:
+                filename.writelines(lines)
+
+        scheduled = [f"{image_path}\n" for image_path in images]
+
+        # Truncate the file from previous runs
+        print("updating dry_run_read.txt")
+        os.open("dry_run_read.txt", "w").close()
+        with os.open("dry_run_scheduled.txt", "w") as filename:
+            filename.writelines(scheduled)
+        return process_images
+
+    def run(self, images, pred_model) -> Tuple[str, Callable[[str], None]]:
+        threshold = QData.threshold
+        self.tags["sanitized_name"] = self.tags["name"].map(
+            lambda x: x if x in Its.kaomojis else x.replace("_", " ")
+        )
+
+        def process_images(filepaths, images):
+            preds = pred_model(images).numpy()
+
+            for ipath, pred in zip(filepaths, preds):
+                ipath = ipath.numpy().decode("utf-8")
+
+                self.tags["preds"] = pred
+                generic = self.tags[self.tags["category"] == 0]
+                chosen = generic[generic["preds"] > threshold]
+                chosen = chosen.sort_values(by="preds", ascending=False)
+                tags_names = chosen["sanitized_name"]
+
+                key = ipath.split("/")[-1].split(".")[0] + "_" + self.name
+                QData.add_tags = tags_names
+                QData.apply_filters((ipath, '', {}, {}), key, False)
+
+                tags_string = ", ".join(tags_names)
+                txtfile = Path(ipath).with_suffix(".txt")
+                with os.open(txtfile, "w") as filename:
+                    filename.write(tags_string)
+        return images, process_images
+
+    def large_batch_interrogate(self, images, dry_run=True) -> str:
+        """ Interrogate a large batch of images. """
 
         # init model
         if not hasattr(self, 'model') or self.model is None:
             self.load()
 
-        os.environ["TF_XLA_FLAGS"] = '--tf_xla_auto_jit=2 --tf_xla_cpu_global_jit'
+        os.environ["TF_XLA_FLAGS"] = '--tf_xla_auto_jit=2 '\
+                                     '--tf_xla_cpu_global_jit'
         # Reduce logging
         # os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
@@ -496,67 +570,29 @@ class WaifuDiffusionInterrogator(Interrogator):
             for device in gpus:
                 try:
                     tf.config.experimental.set_memory_growth(device, True)
-                except RuntimeError as e:
-                    print(e)
+                except RuntimeError as err:
+                    print(err)
 
         if dry_run:  # dry run
             height, width = 224, 224
-
-            def process_images(filepaths, images):
-                lines = []
-                for image_path in filepaths:
-                    image_path = image_path.numpy().decode("utf-8")
-                    lines.append(f"{image_path}\n")
-                with open("dry_run_read.txt", "a") as f:
-                    f.writelines(lines)
-
-            scheduled = [f"{image_path}\n" for image_path in images_list]
-
-            # Truncate the file from previous runs
-            print("updating dry_run_read.txt")
-            open("dry_run_read.txt", "w").close()
-            with open("dry_run_scheduled.txt", "w") as f:
-                f.writelines(scheduled)
+            process_images = self.dry_run(images)
         else:
             _, height, width, _ = self.model.inputs[0].shape
 
-            threshold = QData.threshold
-            self.tags["sanitized_name"] = self.tags["name"].map(
-                lambda x: x if x in Its.kaomojis else x.replace("_", " ")
-            )
-
             @tf.function
-            def pred_model(x):
-                return self.model(x, training=False)
+            def pred_model(model):
+                return self.model(model, training=False)
 
-            def process_images(filepaths, images):
-                preds = pred_model(images).numpy()
+            process_images = self.run(images, pred_model)
 
-                for image_path, pred in zip(filepaths, preds):
-                    image_path = image_path.numpy().decode("utf-8")
-
-                    self.tags["preds"] = pred
-                    general_tags = self.tags[self.tags["category"] == 0]
-                    chosen_tags = general_tags[general_tags["preds"] > threshold]
-                    chosen_tags = chosen_tags.sort_values(by="preds", ascending=False)
-                    tags_names = chosen_tags["sanitized_name"]
-
-                    fi_key = image_path.split("/")[-1].split(".")[0] + "_" + self.name
-                    QData.add_tags = tags_names
-                    QData.apply_filters((image_path, '', {}, {}), fi_key, False)
-
-                    tags_string = ", ".join(tags_names)
-                    with open(Path(image_path).with_suffix(".txt"), "w") as f:
-                        f.write(tags_string)
-
-        batch_size = getattr(shared.opts, 'tagger_batch_size', 1024)
         generator = DataGenerator(
-            file_list=images_list, target_height=height, target_width=width, batch_size=batch_size
+            file_list=images, target_height=height, target_width=width,
+            batch_size=getattr(shared.opts, 'tagger_batch_size', 1024)
         ).genDS()
 
         orig_add_tags = QData.add_tags
-        for filepaths, images in tqdm(generator):
-            process_images(filepaths, images)
+        for filepaths, image_list in tqdm(generator):
+            process_images(filepaths, image_list)
         QData.add_tag = orig_add_tags
         del os.environ["TF_XLA_FLAGS"]
         return ''

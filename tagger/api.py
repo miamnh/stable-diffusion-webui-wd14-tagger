@@ -1,3 +1,4 @@
+"""API module for FastAPI"""
 from typing import Callable
 from threading import Lock
 from secrets import compare_digest
