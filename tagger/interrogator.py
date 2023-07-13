@@ -1,7 +1,7 @@
 """ Interrogator class and subclasses for tagger """
 import os
 from pathlib import Path
-from io import BytesIO
+import io
 from hashlib import sha256
 import json
 from typing import Tuple, List, Dict, Callable
@@ -78,7 +78,7 @@ class Interrogator:
                 del cls.err[key]
             err = ''
             if val != cls.input[key]:
-                if key not in {'input_glob', 'output_dir'}:
+                if key in {'input_glob', 'output_dir'}:
                     err = getattr(IOData, "update_" + key)(val)
                     if key == 'input_glob' and err == '':
                         QData.tags.clear()
@@ -176,7 +176,7 @@ class Interrogator:
             # should work, we queried before to get the image_hash
         else:
             path, out_path, output_dir = IOData.paths[index]
-            Interrogator.load_image(path)
+            image = Interrogator.load_image(path)
             if image is None:
                 return
 
@@ -391,7 +391,7 @@ class WaifuDiffusionInterrogator(Interrogator):
             os.mkdir(mdir)
 
         elif os.path.exists(mpath):
-            with os.open(mpath, 'r') as filename:
+            with io.open(file=mpath, mode='r') as filename:
                 try:
                     data = json.load(filename)
                     data.append(download_model)
@@ -399,7 +399,7 @@ class WaifuDiffusionInterrogator(Interrogator):
                     print(f'Adding download_model {mpath} raised {repr(err)}')
                     data = [download_model]
 
-        with os.open(mpath, 'w') as filename:
+        with io.open(mpath, 'w') as filename:
             json.dump(data, filename)
 
         return model_path, tags_path
@@ -506,15 +506,15 @@ class WaifuDiffusionInterrogator(Interrogator):
             for image_path in filepaths:
                 image_path = image_path.numpy().decode("utf-8")
                 lines.append(f"{image_path}\n")
-            with os.open("dry_run_read.txt", "a") as filename:
+            with io.open("dry_run_read.txt", "a") as filename:
                 filename.writelines(lines)
 
         scheduled = [f"{image_path}\n" for image_path in images]
 
         # Truncate the file from previous runs
         print("updating dry_run_read.txt")
-        os.open("dry_run_read.txt", "w").close()
-        with os.open("dry_run_scheduled.txt", "w") as filename:
+        io.open("dry_run_read.txt", "w").close()
+        with io.open("dry_run_scheduled.txt", "w") as filename:
             filename.writelines(scheduled)
         return process_images
 
@@ -542,7 +542,7 @@ class WaifuDiffusionInterrogator(Interrogator):
 
                 tags_string = ", ".join(tags_names)
                 txtfile = Path(ipath).with_suffix(".txt")
-                with os.open(txtfile, "w") as filename:
+                with io.open(txtfile, "w") as filename:
                     filename.write(tags_string)
         return images, process_images
 
