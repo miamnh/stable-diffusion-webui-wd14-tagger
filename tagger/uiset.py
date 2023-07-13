@@ -243,14 +243,14 @@ class QData:
             cls.rexcl = re_comp('^'+excl+'$', flags=IGNORECASE)
 
     @classmethod
-    def update_search(cls, search: str) -> str:
+    def update_search(cls, search_str: str) -> str:
         search = []
-        for x in map(str.strip, search.split(',')):
-            if x != '':
-                if x[0] == '^' and x[-1] == '$':
-                    search.append(re_comp(x, flags=IGNORECASE))
+        for rex in map(str.strip, search_str.split(',')):
+            if rex != '':
+                if rex[0] == '^' and rex[-1] == '$':
+                    search.append(re_comp(rex, flags=IGNORECASE))
                 else:
-                    search.append(re_comp('^'+x+'$', flags=IGNORECASE))
+                    search.append(re_comp('^'+rex+'$', flags=IGNORECASE))
 
         cls.search_tags = dict(enumerate(search))
         slen = len(cls.search_tags)
