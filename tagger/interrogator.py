@@ -74,8 +74,11 @@ class Interrogator:
     @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str, str]]:
         def setter(val) -> Tuple[str, str]:
-            if key in cls.err:
-                del cls.err[key]
+            err_key = key
+            if key in {"search", "replace"}:
+                err_key = "search_replace"
+            if err_key in cls.err:
+                del cls.err[err_key]
             err = ''
             if val != cls.input[key]:
                 if key in {'input_glob', 'output_dir'}:
@@ -87,7 +90,7 @@ class Interrogator:
                 else:
                     err = getattr(QData, "update_" + key)(val)
                 if err:
-                    cls.err[key] = err
+                    cls.err[err_key] = err
                 else:
                     err = ''
                 cls.input[key] = val
