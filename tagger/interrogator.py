@@ -328,7 +328,7 @@ class DeepDanbooruInterrogator(Interrogator):
         import deepdanbooru.data as ddd
 
         # convert an image to fit the model
-        image_bufs = BytesIO()
+        image_bufs = io.BytesIO()
         image.save(image_bufs, format='PNG')
         image = ddd.load_image_for_evaluate(
             image_bufs,
