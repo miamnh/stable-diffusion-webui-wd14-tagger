@@ -361,8 +361,7 @@ class QData:
 
         for i, regex in cls.search_tags.items():
             if re_match(regex, tag):
-                tag = re_sub(regex, cls.replace_tags[i], tag,
-                             count=1, flags=IGNORECASE)
+                tag = re_sub(regex, cls.replace_tags[i], tag)
                 break
 
         return tag
