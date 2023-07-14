@@ -1,17 +1,22 @@
+""" This module contains the ui for the tagger tab. """
+from typing import Dict, Tuple, List
 import gradio as gr
 from PIL import Image
-from typing import Dict, Tuple, List
+from packaging import version
 
 from modules import ui
 from modules import generation_parameters_copypaste as parameters_copypaste
 
+from tensorflow import __version__ as tf_version
+from webui import wrap_gradio_gpu_call
 from tagger import utils
 from tagger.interrogator import Interrogator as It
-from webui import wrap_gradio_gpu_call
 from tagger.uiset import IOData, QData, ItRetTP
-from tensorflow import __version__ as tf_version
-from packaging import version
 
+
+# issues:
+# exclude tags are not excluded from the tags .txt files
+# the tags are not written to the images
 
 def unload_interrogators() -> List[str]:
     unloaded_models = 0
@@ -24,16 +29,11 @@ def unload_interrogators() -> List[str]:
 
 
 def check_for_errors(name) -> str:
-    if len(It.err) > 0:
-        errors = ', '.join([k.replace('_', ' ') for k in It.err.keys()])
-        return f"Please correct {errors} first"
+    errors = It.get_errors()
     if name not in utils.interrogators:
-        return f"'{name}': invalid interrogator"
+        errors += f"'{name}': invalid interrogator"
 
-    if len(QData.search_tags) != len(QData.replace_tags):
-        return 'search, replace: unequal len, replacements > 1.'
-
-    return ''
+    return errors
 
 
 def on_interrogate(name: str, inverse=False) -> ItRetTP:
@@ -44,9 +44,9 @@ def on_interrogate(name: str, inverse=False) -> ItRetTP:
     if err != '':
         return (None, None, None, err)
 
-    it: It = utils.interrogators[name]
+    interrogator: It = utils.interrogators[name]
     QData.inverse = inverse
-    return it.batch_interrogate()
+    return interrogator.batch_interrogate()
 
 
 def on_inverse_interrogate(name: str) -> Tuple[str, Dict[str, float], str]:
@@ -56,7 +56,7 @@ def on_inverse_interrogate(name: str) -> Tuple[str, Dict[str, float], str]:
 
 def on_interrogate_image(image: Image, interrogator: str) -> ItRetTP:
 
-    # FIXME: hack brcause image interrogaion occurs twice
+    # hack brcause image interrogaion occurs twice
     # It.odd_increment = It.odd_increment + 1
     # if It.odd_increment & 1 == 1:
     #    return (None, None, None, '')
@@ -119,6 +119,7 @@ def on_tag_search_filter_change(
 
 
 def on_ui_tabs():
+    """ configures the ui on the tagger tab """
     # If checkboxes misbehave you have to adapt the default.json preset
 
     with gr.Blocks(analytics_enabled=False) as tagger_interface:

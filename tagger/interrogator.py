@@ -1,6 +1,7 @@
 """ Interrogator class and subclasses for tagger """
 import os
 from pathlib import Path
+from re import compile
 import io
 from hashlib import sha256
 import json
@@ -9,6 +10,7 @@ from pandas import read_csv, read_json
 from PIL import Image, UnidentifiedImageError
 from numpy import asarray, float32, expand_dims
 from tqdm import tqdm
+from collections import defaultdict
 
 from huggingface_hub import hf_hub_download
 from modules import shared
@@ -62,8 +64,7 @@ class Interrogator:
         "output_dir": '',
     }
     output = None
-    err = {}
-    odd_increment = 0
+    #odd_increment = 0
 
     @classmethod
     def flip(cls, key):
@@ -72,29 +73,28 @@ class Interrogator:
         return toggle
 
     @classmethod
+    def get_errors(cls) -> str:
+        errors = ''
+        if len(IOData.err) > 0:
+            # write errors in html pointer list, every error in a <li> tag
+            errors = 'Input/Output errors:<br><ul><li>' + \
+                     '</li><li>'.join(IOData.err) + '</li></ul>'
+        if len(QData.err) > 0:
+            errors += 'Fix to write correct output:<br><ul><li>' + \
+                      '</li><li>'.join(QData.err) + '</li></ul>'
+        return errors
+
+    @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str, str]]:
         def setter(val) -> Tuple[str, str]:
-            err_key = key
-            if key in {"search", "replace"}:
-                err_key = "search_replace"
-            if err_key in cls.err:
-                del cls.err[err_key]
-            err = ''
             if val != cls.input[key]:
                 if key in {'input_glob', 'output_dir'}:
-                    err = getattr(IOData, "update_" + key)(val)
-                    if key == 'input_glob' and err == '':
-                        QData.tags.clear()
-                        QData.ratings.clear()
-                        QData.in_db.clear()
+                    getattr(IOData, "update_" + key)(val)
                 else:
-                    err = getattr(QData, "update_" + key)(val)
-                if err:
-                    cls.err[err_key] = err
-                else:
-                    err = ''
+                    # remove any errors that might be fixed when the setting is changed
+                    getattr(QData, "update_" + key)(val)
                 cls.input[key] = val
-            return (cls.input[key], err)
+            return (cls.input[key], cls.get_errors())
 
         return setter
 
@@ -166,7 +166,10 @@ class Interrogator:
         for got in QData.in_db.values():
             QData.apply_filters(got)
 
-        Interrogator.output = QData.finalize(count)
+        if Interrogator.inverse:
+            Interrogator.output = QData.finalize_inverse(count)
+        else:
+            Interrogator.output = QData.finalize(count)
         return Interrogator.output
 
     def batch_interrogate_image(self, index: int) -> None:
@@ -222,7 +225,11 @@ class Interrogator:
 
             # alternating dry run and run modes
             self.run_mode = (self.run_mode + 1) % 2
-            Interrogator.output = QData.finalize()
+            count = len(image_list)
+            if Interrogator.inverse:
+                Interrogator.output = QData.finalize_inverse(count)
+            else:
+                Interrogator.output = QData.finalize(count)
             return Interrogator.output
 
         verbose = getattr(shared.opts, 'tagger_verbose', True)

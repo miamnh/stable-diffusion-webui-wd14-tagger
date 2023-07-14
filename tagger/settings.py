@@ -67,6 +67,14 @@ def on_ui_settings():
         ),
     )
     shared.opts.add_option(
+        key='tagger_weighted_tags_files',
+        info=shared.OptionInfo(
+            False,
+            label='Write weights to tags files',
+            section=section,
+        ),
+    )
+    shared.opts.add_option(
         key='tagger_verbose',
         info=shared.OptionInfo(
             False,
