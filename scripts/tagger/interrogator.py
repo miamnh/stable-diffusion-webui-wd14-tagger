@@ -166,7 +166,7 @@ class Interrogator:
         for got in QData.in_db.values():
             QData.apply_filters(got)
 
-        if Interrogator.inverse:
+        if QData.inverse:
             Interrogator.output = QData.finalize_inverse(count)
         else:
             Interrogator.output = QData.finalize(count)
@@ -226,7 +226,7 @@ class Interrogator:
             # alternating dry run and run modes
             self.run_mode = (self.run_mode + 1) % 2
             count = len(image_list)
-            if Interrogator.inverse:
+            if QData.inverse:
                 Interrogator.output = QData.finalize_inverse(count)
             else:
                 Interrogator.output = QData.finalize(count)
