@@ -6,6 +6,7 @@ from PIL import Image
 
 
 def smart_imread(img, flag=cv2.IMREAD_UNCHANGED):
+    """ Read an image, convert to 24-bit if necessary """
     if img.endswith(".gif"):
         img = Image.open(img)
         img = img.convert("RGB")
@@ -16,6 +17,7 @@ def smart_imread(img, flag=cv2.IMREAD_UNCHANGED):
 
 
 def smart_24bit(img):
+    """ Convert an image to 24-bit if necessary """
     if img.dtype is np.dtype(np.uint16):
         img = (img / 257).astype(np.uint8)
 
@@ -29,6 +31,7 @@ def smart_24bit(img):
 
 
 def make_square(img, target_size):
+    """ Make an image square """
     old_size = img.shape[:2]
     desired_size = max(old_size)
     desired_size = max(desired_size, target_size)
@@ -46,6 +49,7 @@ def make_square(img, target_size):
 
 
 def smart_resize(img, size):
+    """ Resize an image """
     # Assumes the image has already gone through make_square
     if img.shape[0] > size:
         img = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)

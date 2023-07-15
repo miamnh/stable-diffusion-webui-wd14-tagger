@@ -1,6 +1,6 @@
 """ for handling ui settings """
 
-from typing import List, Dict, Tuple, Callable, Set
+from typing import List, Dict, Tuple, Callable, Set, Optional
 import os
 from pathlib import Path
 from glob import glob
@@ -43,6 +43,7 @@ class IOData:
     output_root = None
     paths = []
     save_tags = True
+    err = set()
 
     @classmethod
     def flip_save_tags(cls) -> callable:
@@ -55,16 +56,14 @@ class IOData:
         cls.save_tags = not cls.save_tags
 
     @classmethod
-    def update_output_dir(cls, output_dir: str) -> str:
+    def update_output_dir(cls, output_dir: str) -> None:
         """ update output directory, and set input and output paths """
         pout = Path(output_dir)
         if pout != cls.output_root:
             paths = [x[0] for x in cls.paths]
             cls.paths = []
             cls.output_root = pout
-            err = cls.set_batch_io(paths)
-            return err
-        return ''
+            cls.set_batch_io(paths)
 
     @classmethod
     def get_bytes_hash(cls, data) -> str:
@@ -73,7 +72,7 @@ class IOData:
         return sha256(data).hexdigest()
 
     @classmethod
-    def get_hashes(cls):
+    def get_hashes(cls) -> Set[str]:
         """ get hashes of all files """
         ret = set()
         for entries in cls.paths:
@@ -88,12 +87,12 @@ class IOData:
         return ret
 
     @classmethod
-    def update_input_glob(cls, input_glob: str) -> str:
+    def update_input_glob(cls, input_glob: str) -> None:
         """ update input glob pattern, and set input and output paths """
         input_glob = input_glob.strip()
         if input_glob == cls.last_input_glob:
             print('input glob did not change')
-            return ''
+            return
         last_input_glob = input_glob
 
         cls.paths = []
@@ -106,8 +105,11 @@ class IOData:
         # get root directory of input glob pattern
         base_dir = input_glob.replace('?', '*')
         base_dir = base_dir.split(os.sep + '*').pop(0)
+        msg = 'Invalid input directory'
         if not os.path.isdir(base_dir):
-            return 'Invalid input directory'
+            cls.err.add(msg)
+            return
+        cls.err.discard(msg)
 
         if cls.output_root is None:
             output_dir = base_dir
@@ -118,21 +120,22 @@ class IOData:
 
         cls.base_dir_last = Path(base_dir).parts[-1]
         cls.base_dir = base_dir
-        err = QData.read_json(cls.output_root)
-        if err != '':
-            return err
+        QData.read_json(cls.output_root)
 
         recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
         paths = glob(input_glob, recursive=recursive)
         print(f'found {len(paths)} image(s)')
-        err = cls.set_batch_io(paths)
-        if err == '':
+        cls.set_batch_io(paths)
+        if len(cls.err) == 0:
             cls.last_input_glob = last_input_glob
+            QData.tags.clear()
+            QData.ratings.clear()
+            QData.in_db.clear()
 
-        return err
+        return
 
     @classmethod
-    def set_batch_io(cls, paths: List[Path]) -> str:
+    def set_batch_io(cls, paths: List[Path]) -> None:
         """ set input and output paths for batch mode """
         checked_dirs = set()
         for path in paths:
@@ -150,13 +153,15 @@ class IOData:
                 info = tags_format.Info(path, 'txt')
                 fmt = partial(lambda info, m: tags_format.parse(m, info), info)
 
+                msg = 'Invalid output format'
+                cls.err.discard(msg)
                 try:
                     formatted_output_filename = tags_format.pattern.sub(
                         fmt,
                         Its.output_filename_format
                     )
-                except (TypeError, ValueError) as error:
-                    return f"{path}: output format: {str(error)}"
+                except (TypeError, ValueError):
+                    cls.err.add(msg)
 
                 output_dir = cls.output_root.joinpath(
                     *path.parts[base_dir_last_idx + 1:]).parent
@@ -168,15 +173,16 @@ class IOData:
                 else:
                     checked_dirs.add(output_dir)
                     if os.path.exists(output_dir):
+                        msg = 'output_dir: not a directory.'
                         if os.path.isdir(output_dir):
                             cls.paths.append([path, tags_out, ''])
+                            cls.err.discard(msg)
                         else:
-                            return f"{output_dir}: not a directory."
+                            cls.err.add(msg)
                     else:
                         cls.paths.append([path, tags_out, output_dir])
             elif ext != '.txt' and 'db.json' not in path:
                 print(f'{path}: not an image extension: "{ext}"')
-        return ''
 
 
 def get_i_wt(stored: float) -> Tuple[int, float]:
@@ -192,8 +198,7 @@ class QData:
     """ Query data: contains parameters for the query """
     add_tags = []
     keep_tags = set()
-    exclude_tags = set()
-    rexcl = None
+    exclude_tags = []
     search_tags = {}
     replace_tags = []
     threshold = 0.35
@@ -201,17 +206,18 @@ class QData:
 
     # read from db.json, update with what should be written to db.json:
     json_db = None
-    weighed = (defaultdict(lambda: []), defaultdict(lambda: []))
+    weighed = (defaultdict(list), defaultdict(list))
     query = {}
 
     # representing the (cumulative) current interrogations
-    ratings = defaultdict(lambda: 0.0)
-    tags = defaultdict(lambda: [])
+    ratings = defaultdict(float)
+    tags = defaultdict(list)
     in_db = {}
-    for_tags_file = defaultdict(set)
+    for_tags_file = defaultdict(lambda: defaultdict(float))
 
     inverse = False
     had_new = False
+    err = set()
 
     @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str]]:
@@ -220,94 +226,180 @@ class QData:
         return setter
 
     @classmethod
-    def update_keep(cls, keep: str) -> str:
-        cls.keep_tags = {x for x in map(str.strip, keep.split(',')) if x != ''}
+    def set_attr(cls, current: str, tag: str) -> None:
+        """ set attribute for current tag """
+        attr = getattr(cls, current + '_tags')
+        if current in ['add', 'replace']:
+            attr.append(tag)
+        elif current == 'keep':
+            attr.add(tag)
+        else:
+            rex = cls.compile_rex(tag)
+            if rex:
+                if current == 'exclude':
+                    attr.append(rex)
+                elif current == 'search':
+                    attr[len(attr)] = rex
+            else:
+                cls.err.add(f'empty regex in {current} tags')
 
     @classmethod
-    def update_add(cls, add: str) -> str:
-        cls.add_tags = [x for x in map(str.strip, add.split(',')) if x != '']
+    def test_add(cls, tag: str, current: str, incompatble: list) -> None:
+        """ check if there are incompatible collections """
+        msg = f'Empty tag in {current} tags'
+        if tag == '':
+            cls.err.add(msg)
+            return
+        cls.err.discard(msg)
+        for bad in incompatble:
+            if current < bad:
+                msg = f'"{tag}" is both in {bad} and {current} tags'
+            else:
+                msg = f'"{tag}" is both in {current} and {bad} tags'
+            attr = getattr(cls, bad + '_tags')
+            if bad == 'search':
+                for rex in attr.values():
+                    if rex.match(tag):
+                        cls.err.add(msg)
+                        return
+            elif bad in 'exclude':
+                if any(rex.match(tag) for rex in attr):
+                    cls.err.add(msg)
+                    return
+            else:
+                if tag in attr:
+                    cls.err.add(msg)
+                    return
+        cls.set_attr(current, tag)
+
+    @classmethod
+    def update_keep(cls, keep: str) -> None:
+        cls.keep_tags = set()
+        msg = 'Empty tag in keep tags'
+        if keep == '':
+            cls.err.add(msg)
+            return
+        cls.err.discard(msg)
+        un_re = re_comp(r' keep(?: and \w+)? tags')
+        cls.err = {err for err in cls.err if not un_re.search(err)}
+        for tag in map(str.strip, keep.split(',')):
+            cls.test_add(tag, 'keep', ['exclude', 'search'])
+
+    @classmethod
+    def update_add(cls, add: str) -> None:
+        cls.add_tags = []
+        if add == '':
+            return
+        un_re = re_comp(r' add(?: and \w+)? tags')
+        cls.err = {err for err in cls.err if not un_re.search(err)}
+        for tag in map(str.strip, add.split(',')):
+            cls.test_add(tag, 'add', ['exclude', 'search'])
+
+        # silently raise count threshold to avoid issue in apply_filters
         count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
         if len(cls.add_tags) > count_threshold:
-            # secretly raise count threshold to avoid issue in apply_filters
             shared.opts.tagger_count_threshold = len(cls.add_tags)
 
     @classmethod
-    def update_exclude(cls, exclude: str) -> str:
-        excl = exclude.strip()
-        # first filter empty strings
-        if ',' in excl:
-            filtered = [x for x in map(str.strip, excl.split(',')) if x != '']
-            cls.exclude_tags = set(filtered)
-            cls.rexcl = None
-        elif excl != '':
-            cls.rexcl = re_comp('^'+excl+'$', flags=IGNORECASE)
+    def compile_rex(cls, rex: str) -> Optional:
+        if rex in {'', '^', '$', '^$'}:
+            return None
+        if rex[0] == '^':
+            rex = rex[1:]
+        if rex[-1] == '$':
+            rex = rex[:-1]
+        return re_comp('^'+rex+'$', flags=IGNORECASE)
 
     @classmethod
-    def update_search(cls, search: str) -> str:
-        search = []
-        for x in map(str.strip, search.split(',')):
-            if x != '':
-                if x[0] == '^' and x[-1] == '$':
-                    search.append(re_comp(x, flags=IGNORECASE))
-                else:
-                    search.append(re_comp('^'+x+'$', flags=IGNORECASE))
-
-        cls.search_tags = dict(enumerate(search))
-        slen = len(cls.search_tags)
-
-        if slen != len(cls.replace_tags):
-            return 'search, replace: unequal len, replacements > 1.'
-        return ''
+    def update_exclude(cls, exclude: str) -> None:
+        cls.exclude_tags = []
+        if exclude == '':
+            return
+        un_re = re_comp(r' exclude(?: and \w+)? tags')
+        cls.err = {err for err in cls.err if not un_re.search(err)}
+        for excl in map(str.strip, exclude.split(',')):
+            incompatble = ['add', 'keep', 'search', 'replace']
+            cls.test_add(excl, 'exclude', incompatble)
 
     @classmethod
-    def update_replace(cls, replace: str) -> str:
-        repl = [x for x in map(str.strip, replace.split(',')) if x != '']
-        cls.replace_tags = list(repl)
+    def update_search(cls, search_str: str) -> None:
+        cls.search_tags = {}
+        if search_str == '':
+            return
+        un_re = re_comp(r' search(?: and \w+)? tags')
+        cls.err = {err for err in cls.err if not un_re.search(err)}
+        for rex in map(str.strip, search_str.split(',')):
+            incompatble = ['add', 'keep', 'exclude', 'replace']
+            cls.test_add(rex, 'search', incompatble)
+
+        msg = 'Unequal number of search and replace tags'
         if len(cls.search_tags) != len(cls.replace_tags):
-            return 'search, replace: unequal len, replacements > 1.'
-        return ''
+            cls.err.add(msg)
+        else:
+            cls.err.discard(msg)
 
     @classmethod
-    def read_json(cls, outdir) -> str:
+    def update_replace(cls, replace: str) -> None:
+        cls.replace_tags = []
+        if replace == '':
+            return
+        un_re = re_comp(r' replace(?: and \w+)? tags')
+        cls.err = {err for err in cls.err if not un_re.search(err)}
+        for repl in map(str.strip, replace.split(',')):
+            cls.test_add(repl, 'replace', ['exclude', 'search'])
+        msg = 'Unequal number of search and replace tags'
+        if len(cls.search_tags) != len(cls.replace_tags):
+            cls.err.add(msg)
+        else:
+            cls.err.discard(msg)
+
+    @classmethod
+    def read_json(cls, outdir) -> None:
         """ read db.json if it exists """
         cls.json_db = None
         if getattr(shared.opts, 'tagger_auto_serde_json', True):
             cls.json_db = outdir.joinpath('db.json')
             if cls.json_db.is_file():
                 cls.had_new = False
+                msg = f'Error reading {cls.json_db}'
+                cls.err.discard(msg)
                 try:
                     data = loads(cls.json_db.read_text())
                 except JSONDecodeError as err:
-                    return f'Error reading {cls.json_db}: {repr(err)}'
+                    print(f'{msg}: {repr(err)}')
+                    cls.err.add(msg)
+                    return
                 for key in ["tag", "rating", "query"]:
+                    msg = f'{cls.json_db}: missing {key} key.'
                     if key not in data:
-                        return f'{cls.json_db}: missing {key} key.'
+                        cls.err.add(msg)
+                    else:
+                        cls.err.discard(msg)
                 for key in ["add", "keep", "exclude", "search", "replace"]:
-                    if key in data:
-                        err = getattr(cls, f"update_{key}")(data[key])
-                        if err:
-                            return err
+                    if key in data and data[key] != '':
+                        getattr(cls, f"update_{key}")(data[key])
                 cls.weighed = (
-                    defaultdict(lambda: [], data["rating"]),
-                    defaultdict(lambda: [], data["tag"])
+                    defaultdict(list, data["rating"]),
+                    defaultdict(list, data["tag"])
                 )
                 cls.query = data["query"]
                 print(f'Read {cls.json_db}: {len(cls.query)} interrogations, '
                       f'{len(cls.tags)} tags.')
-        return ''
 
     @classmethod
     def write_json(cls) -> None:
         """ write db.json """
         if cls.json_db is not None:
             search = sorted(cls.search_tags.items(), key=lambda x: x[0])
+            search = [x[1].pattern for x in search]
+            exclude = [x.pattern for x in cls.exclude_tags]
             data = {
                 "rating": cls.weighed[0],
                 "tag": cls.weighed[1],
                 "query": cls.query,
                 "add": ','.join(cls.add_tags),
                 "keep": ','.join(cls.keep_tags),
-                "exclude": ','.join(cls.exclude_tags),
+                "exclude": ','.join(exclude),
                 "search": ','.join([x[1] for x in search]),
                 "repl": ','.join(cls.replace_tags)
             }
@@ -344,10 +436,7 @@ class QData:
     @classmethod
     def is_excluded(cls, ent: str) -> bool:
         """ check if tag is excluded """
-        if cls.rexcl:
-            return re_match(cls.rexcl, ent)
-
-        return ent in cls.exclude_tags
+        return any(re_match(x, ent) for x in cls.exclude_tags)
 
     @classmethod
     def correct_tag(cls, tag: str) -> str:
@@ -361,8 +450,7 @@ class QData:
 
         for i, regex in cls.search_tags.items():
             if re_match(regex, tag):
-                tag = re_sub(regex, cls.replace_tags[i], tag,
-                             count=1, flags=IGNORECASE)
+                tag = re_sub(regex, cls.replace_tags[i], tag)
                 break
 
         return tag
@@ -382,6 +470,7 @@ class QData:
     @classmethod
     def apply_filters(cls, data) -> Set[str]:
         """ apply filters to query data, store in db.json if required """
+        # data = (path, fi_key, tags, ratings, new)
         # fi_key == '' means this is a new file or interrogation for that file
 
         tags = sorted(data[4].items(), key=lambda x: x[1], reverse=True)
@@ -420,18 +509,14 @@ class QData:
                     if cls.is_excluded(tag) or val < cls.threshold:
                         continue
                 if data[1] != '':
-                    cls.for_tags_file[data[1]].add(tag)
+                    current = cls.for_tags_file[data[1]].get(tag, 0.0)
+                    cls.for_tags_file[data[1]][tag] = min(val + current, 1.0)
                 count += 1
             elif fi_key == '':
                 break
             if tag not in cls.add_tags:
                 # those are already added
                 cls.tags[tag].append(val)
-
-        for tag in cls.add_tags:
-            if data[1] != '':
-                cls.for_tags_file[data[1]].add(tag)
-            cls.tags[tag] = [1.0 for _ in range(len(cls.query))]
 
         if getattr(shared.opts, 'tagger_verbose', True):
             print(f'{data[0]}: {count}/{len(tags)} tags kept')
@@ -459,7 +544,14 @@ class QData:
             cls.apply_filters(got)
 
         # average
+        if cls.inverse:
+            return cls.finalize_inverse(count)
         return cls.finalize(count)
+
+    @classmethod
+    def sort_tags(cls, tags: Dict[str, float]) -> List[Tuple[str, float]]:
+        """ sort tags by value, return list of tuples """
+        return sorted(tags.items(), key=lambda x: x[1], reverse=True)
 
     @classmethod
     def finalize(cls, count: int) -> ItRetTP:
@@ -470,7 +562,15 @@ class QData:
 
         tags_str, ratings, tags = '', {}, {}
 
-        js_bool = 'true' if cls.inverse else 'false'
+        for val in cls.for_tags_file.values():
+            for k in cls.add_tags:
+                val[k] = 1.0 * count
+
+        for k in cls.add_tags:
+            escaped = html_escape(k)
+            tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
+                        f"""true)'>{escaped}</a>"""
+            tags[k] = 1.0
 
         for k, lst in cls.tags.items():
             # len(!) fraction of the all interrogations was above the threshold
@@ -483,16 +583,50 @@ class QData:
                 # replace if k interferes with html code
                 escaped = html_escape(k)
                 tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
-                            f"""{js_bool})'>{escaped}</a>"""
+                            f"""true)'>{escaped}</a>"""
             else:
                 for remaining_tags in cls.for_tags_file.values():
-                    remaining_tags.discard(k)
+                    if k in remaining_tags:
+                        if k not in cls.add_tags and k not in cls.keep_tags:
+                            del remaining_tags[k]
 
         for ent, val in cls.ratings.items():
             ratings[ent] = val / count
 
+        weighted_tags_files = getattr(shared.opts,
+                                      'tagger_weighted_tags_files', False)
         for file, remaining_tags in cls.for_tags_file.items():
-            file.write_text(', '.join(remaining_tags), encoding='utf-8')
+            sorted_tags = cls.sort_tags(remaining_tags)
+            if weighted_tags_files:
+                sorted_tags = [f'({k}:{v})' for k, v in sorted_tags]
+            else:
+                sorted_tags = [k for k, v in sorted_tags]
+            file.write_text(', '.join(sorted_tags), encoding='utf-8')
+
+        print('all done :)')
+        return (tags_str[2:], ratings, tags, '')
+
+    @classmethod
+    def finalize_inverse(cls, count: int) -> ItRetTP:
+        """ finalize the query, return the results """
+        count += len(cls.in_db)
+        if count == 0:
+            return [None, None, None, 'no results for query']
+
+        tags_str, ratings, tags = '', {}, {}
+
+        for k, lst in cls.tags.items():
+            # len(!) fraction of the all interrogations was above the threshold
+            fraction_of_queries = len(lst) / count
+
+            if fraction_of_queries < cls.tag_frac_threshold:
+                # store the average of those interrogations sum(!) / count
+                tags[k] = sum(lst) / count
+                # trigger an event to place the tag in the active tags list
+                # replace if k interferes with html code
+                escaped = html_escape(k)
+                tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
+                            f"""false)'>{escaped}</a>"""
 
         print('all done :)')
         return (tags_str[2:], ratings, tags, '')

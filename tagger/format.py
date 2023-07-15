@@ -1,3 +1,4 @@
+"""Format module, for formatting output filenames"""
 import re
 import hashlib
 
