@@ -75,7 +75,6 @@ def refresh_interrogators() -> List[str]:
     onnx_path = getattr(shared.cmd_opts, 'onnxtagger_path', default_onnx_path)
     os.makedirs(ddp_path, exist_ok=True)
     os.makedirs(onnx_path, exist_ok=True)
-    )
 
     for path in os.scandir(ddp_path):
         print(f"Scanning {path} as deepdanbooru project")
