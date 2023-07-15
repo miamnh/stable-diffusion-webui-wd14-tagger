@@ -70,17 +70,14 @@ def refresh_interrogators() -> List[str]:
     }
 
     # load deepdanbooru project
-    os.makedirs(
-        getattr(shared.cmd_opts, 'deepdanbooru_projects_path',
-                default_ddp_path),
-        exist_ok=True
-    )
-    os.makedirs(
-        getattr(shared.cmd_opts, 'onnxtagger_path', default_onnx_path),
-        exist_ok=True
+    ddp_path = getattr(shared.cmd_opts, 'deepdanbooru_projects_path',
+                       default_ddp_path)
+    onnx_path = getattr(shared.cmd_opts, 'onnxtagger_path', default_onnx_path)
+    os.makedirs(ddp_path, exist_ok=True)
+    os.makedirs(onnx_path, exist_ok=True)
     )
 
-    for path in os.scandir(shared.cmd_opts.deepdanbooru_projects_path):
+    for path in os.scandir(ddp_path):
         print(f"Scanning {path} as deepdanbooru project")
         if not path.is_dir():
             print(f"Warning: {path} is not a directory, skipped")
@@ -92,7 +89,7 @@ def refresh_interrogators() -> List[str]:
 
         interrogators[path.name] = DeepDanbooruInterrogator(path.name, path)
     # scan for onnx models as well
-    for path in os.scandir(shared.cmd_opts.onnxtagger_path):
+    for path in os.scandir(onnx_path):
         print(f"Scanning {path} as onnx model")
         if not path.is_dir():
             print(f"Warning: {path} is not a directory, skipped")
