@@ -15,9 +15,9 @@ from PIL import Image
 from modules import shared
 from modules.deepbooru import re_special as tag_escape_pattern
 
-from tagger import format as tags_format
+from scripts.tagger import format as tags_format
 
-from tagger import settings
+from scripts.tagger import settings
 Its = settings.InterrogatorSettings
 
 # PIL.Image.registered_extensions() returns only PNG if you call early
