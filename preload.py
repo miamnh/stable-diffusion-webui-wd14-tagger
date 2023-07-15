@@ -1,3 +1,4 @@
+""" Preload module for DeepDanbooru or onnxtagger. """
 from pathlib import Path
 from argparse import ArgumentParser
 
@@ -24,4 +25,3 @@ def preload(parser: ArgumentParser):
         help='Path to directory with Onnyx project(s).',
         default=default_onnx_path
     )
-
