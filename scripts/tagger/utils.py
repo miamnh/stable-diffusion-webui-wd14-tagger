@@ -5,9 +5,9 @@ from pathlib import Path
 
 from modules import shared, scripts
 from preload import default_ddp_path, default_onnx_path
-from tagger.preset import Preset
-from tagger.interrogator import Interrogator, DeepDanbooruInterrogator
-from tagger.interrogator import WaifuDiffusionInterrogator
+from scripts.tagger.preset import Preset
+from scripts.tagger.interrogator import Interrogator, DeepDanbooruInterrogator
+from scripts.tagger.interrogator import WaifuDiffusionInterrogator
 
 preset = Preset(Path(scripts.basedir(), 'presets'))
 

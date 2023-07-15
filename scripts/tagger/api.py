@@ -8,8 +8,8 @@ from modules.call_queue import queue_lock
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from tagger import utils
-from tagger import api_models as models
+from scripts.tagger import utils
+from scripts.tagger import api_models as models
 
 
 class Api:

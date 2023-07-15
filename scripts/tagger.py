@@ -1,8 +1,8 @@
 from PIL import Image, ImageFile
 
 from modules import script_callbacks
-from tagger.api import on_app_started
-from tagger.ui import on_ui_tabs
+from scripts.tagger.api import on_app_started
+from scripts.tagger.ui import on_ui_tabs
 
 
 # if you do not initialize the Image object

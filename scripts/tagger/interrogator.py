@@ -13,8 +13,8 @@ from huggingface_hub import hf_hub_download
 from modules import shared
 
 from . import dbimutils
-from tagger import settings
-from tagger.uiset import QData, IOData, ItRetTP
+from scripts.tagger import settings
+from scripts.tagger.uiset import QData, IOData, ItRetTP
 
 Its = settings.InterrogatorSettings
 
@@ -486,7 +486,7 @@ class WaifuDiffusionInterrogator(Interrogator):
 
         import tensorflow as tf
 
-        from tagger.Generator.TFDataReader import DataGenerator
+        from scripts.tagger.Generator.TFDataReader import DataGenerator
 
         # tensorflow maps nearly all vram by default, so we limit this
         # https://www.tensorflow.org/guide/gpu#limiting_gpu_memory_growth
