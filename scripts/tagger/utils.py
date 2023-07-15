@@ -66,12 +66,7 @@ def refresh_interrogators() -> List[str]:
             'wd-v1-4-moat-tagger-v2',
             repo_id='SmilingWolf/wd-v1-4-moat-tagger-v2'
         ),
-        # If you have these, you can uncomment them to use them
-        # 'wd-v1-4-convnextv2-tagger-v2': WaifuDiffusionInterrogator(
-        #    'wd-v1-4-convnextv2-tagger-v2',
-        #    repo_id='SmilingWolf/SW-CV-ModelZoo'
-        # ),
-        # 'Z3D-E621-Convnext': WaifuDiffusionInterrogator('Z3D-E621-Convnext'),
+        #'Z3D-E621-Convnext': WaifuDiffusionInterrogator('Z3D-E621-Convnext'),
     }
 
     # load deepdanbooru project
@@ -121,8 +116,17 @@ def refresh_interrogators() -> List[str]:
         tags_path = Path(path, csv[0])
 
         if path.name not in interrogators:
-            raise NotImplementedError(f"Add {path.name} model to interrogators"
-                                      " dict in tagger/utils.py")
+            if path.name == 'wd-v1-4-convnextv2-tagger-v2':
+                interrogators[path.name] = WaifuDiffusionInterrogator(
+                    path.name,
+                    repo_id='SmilingWolf/SW-CV-ModelZoo'
+                )
+            elif path.name == 'Z3D-E621-Convnext':
+                interrogators[path.name] = WaifuDiffusionInterrogator(
+                    'Z3D-E621-Convnext')
+            else:
+                raise NotImplementedError(f"Add {path.name} resolution similar"
+                                          "to above here")
 
         interrogators[path.name].model_path = model_path
         interrogators[path.name].tags_path = tags_path
