@@ -4,6 +4,7 @@ from pathlib import Path
 import io
 from hashlib import sha256
 import json
+from platform import system
 from typing import Tuple, List, Dict, Callable
 from pandas import read_csv, read_json
 from PIL import Image, UnidentifiedImageError
@@ -438,9 +439,13 @@ class WaifuDiffusionInterrogator(Interrogator):
         # TODO: remove old package when the environment changes?
         from launch import is_installed, run_pip
         if not is_installed('onnxruntime'):
+            if system() == "Darwin":
+                package_name = "onnxruntime-silicon"
+            else:
+                package_name = "onnxruntime-gpu"
             package = os.environ.get(
                 'ONNXRUNTIME_PACKAGE',
-                'onnxruntime-gpu'
+                package_name
             )
 
             run_pip(f'install {package}', 'onnxruntime')
