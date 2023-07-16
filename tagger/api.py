@@ -11,6 +11,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from tagger import utils
 from tagger import api_models as models
+from tagger.uiset import QData
 
 
 class Api:
@@ -82,15 +83,14 @@ class Api:
         interrogator = utils.interrogators[req.model]
 
         with self.queue_lock:
-            ratings, tags = interrogator.interrogate(image)
+            data = ('', '', '') + interrogator.interrogate(image)
+            QData.apply_filters(data)
+            output = QData.finalize(1)
 
         return models.TaggerInterrogateResponse(
             caption={
-                **ratings,
-                **interrogator.postprocess_tags(
-                    tags,
-                    req.threshold
-                )
+                **data[3],
+                **output[2]
             })
 
     def endpoint_interrogators(self):
