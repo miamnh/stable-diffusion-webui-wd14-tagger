@@ -83,6 +83,10 @@ class Api:
         interrogator = utils.interrogators[req.model]
 
         with self.queue_lock:
+            QData.tags.clear()
+            QData.ratings.clear()
+            QData.in_db.clear()
+            QData.for_tags_file.clear()
             data = ('', '', '') + interrogator.interrogate(image)
             QData.apply_filters(data)
             output = QData.finalize(1)
