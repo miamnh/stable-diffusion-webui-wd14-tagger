@@ -9,9 +9,9 @@ from modules import generation_parameters_copypaste as parameters_copypaste
 
 from tensorflow import __version__ as tf_version
 from webui import wrap_gradio_gpu_call
-from scripts.tagger import utils
-from scripts.tagger.interrogator import Interrogator as It
-from scripts.tagger.uiset import IOData, QData, ItRetTP
+from tagger import utils
+from tagger.interrogator import Interrogator as It
+from tagger.uiset import IOData, QData, ItRetTP
 
 
 # issues:
