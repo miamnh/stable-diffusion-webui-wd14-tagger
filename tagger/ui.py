@@ -30,7 +30,7 @@ def unload_interrogators() -> List[str]:
 
 def check_for_errors(name) -> str:
     errors = It.get_errors()
-    if name not in utils.interrogators:
+    if not any(i.name == name for i in utils.interrogators.values()):
         errors += f"'{name}': invalid interrogator"
 
     return errors
@@ -44,7 +44,8 @@ def on_interrogate(name: str, inverse=False) -> ItRetTP:
     if err != '':
         return (None, None, None, err)
 
-    interrogator: It = utils.interrogators[name]
+    such_name = (i for i in utils.interrogators.values() if name == i.name)
+    interrogator: It = next(such_name, None)
     QData.inverse = inverse
     return interrogator.batch_interrogate()
 
@@ -209,7 +210,11 @@ def on_ui_tabs():
                 # interrogator selector
                 with gr.Column():
                     with gr.Row(variant='compact'):
-                        interrogator_names = utils.refresh_interrogators()
+                        def refresh():
+                            utils.refresh_interrogators()
+                            return sorted(x.name for x in utils.interrogators
+                                                               .values())
+                        interrogator_names = refresh()
                         interrogator = utils.preset.component(
                             gr.Dropdown,
                             label='Interrogator',
@@ -224,7 +229,7 @@ def on_ui_tabs():
                         ui.create_refresh_button(
                             interrogator,
                             lambda: None,
-                            lambda: {'choices': utils.refresh_interrogators()},
+                            lambda: {'choices': refresh()},
                             'refresh_interrogator'
                         )
 
