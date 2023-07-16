@@ -406,6 +406,7 @@ class WaifuDiffusionInterrogator(Interrogator):
         model_path='model.onnx',
         tags_path='selected_tags.csv',
         repo_id=None,
+        from_github=False,
     ) -> None:
         super().__init__(name)
         self.repo_id = repo_id
@@ -414,16 +415,21 @@ class WaifuDiffusionInterrogator(Interrogator):
         self.tags = None
         self.model = None
         self.tags = None
+        self.from_github = from_github
 
     def download(self) -> None:
         mdir = Path(shared.models_path, 'interrogators')
-        if self.repo_id is not None:
-            print(f"Loading {self.name} model file from {self.repo_id}")
+        if self.repo_id is not None and not self.from_github:
+            print(f"Loading {self.name} model file from {self.repo_id}, {self.model_path}")
 
-            self.model_path = hf_hub_download(self.repo_id, self.model_path,
-                                              cache_dir=mdir)
-            self.tags_path = hf_hub_download(self.repo_id, self.tags_path,
-                                             cache_dir=mdir)
+            self.model_path = hf_hub_download(
+                self.repo_id,
+                self.model_path,
+                cache_dir=mdir)
+            self.tags_path = hf_hub_download(
+                self.repo_id,
+                self.tags_path,
+                cache_dir=mdir)
 
         download_model = {
             'name': self.name,
