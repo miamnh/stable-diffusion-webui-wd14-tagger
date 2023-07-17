@@ -45,6 +45,7 @@ def on_inverse_interrogate(name: str) -> Tuple[str, Dict[str, float], str]:
     ret = on_interrogate(name, True)
     return (ret[0], ret[2], ret[3])
 
+
 def on_gallery() -> List:
     return It.get_image_dups()
 
@@ -339,6 +340,10 @@ def on_ui_tabs():
                             elem_id='discard-tag-confidences',
                         )
                     with tab_gallery:
+                        # Note: this elem_id is dapted inmy fork of the
+                        # infinite image browsing component to avoid conflicts
+                        # with the same extension on a webui tab.
+                        gr.HTML("error", elem_id="infinite_image_browsing_container_wrapper")
                         gallery = gr.Gallery(
                             label='Gallery',
                             elem_id='gallery',
