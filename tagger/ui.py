@@ -1,17 +1,23 @@
 """ This module contains the ui for the tagger tab. """
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Callable
 import gradio as gr
+from gradio import routes
 from PIL import Image
 from packaging import version
+import os
 
 from modules import ui
 from modules import generation_parameters_copypaste as parameters_copypaste
+from modules import shared
+from modules.paths import script_path
 
 from tensorflow import __version__ as tf_version
 from webui import wrap_gradio_gpu_call
 from tagger import utils
 from tagger.interrogator import Interrogator as It
 from tagger.uiset import IOData, QData, ItRetTP
+from addons.extensions import registered_extensions
+from addons.extension_tools import javascript_html
 
 
 # issues:
@@ -115,8 +121,61 @@ def on_tag_search_filter_change(
     return (', '.join(tags.keys()), tags, '')
 
 
+def reload_javascript(
+    GradioTemplateResponseOriginal: Callable, js: str, css: str
+):
+    def template_response(*args, **kwargs):
+        res = GradioTemplateResponseOriginal(*args, **kwargs)
+        res.body = res.body.replace(b'</head>', f'{js}</head>'.encode("utf8"))
+        res.body = res.body.replace(b'</body>', f'{css}</body>'.encode("utf8"))
+        res.init_headers()
+        return res
+
+    return template_response
+
+
+def amend_ui() -> Tuple[gr.Blocks, List[Callable]]:
+
+    callbacks_ui_tabs = []
+    callbacks_app_started = []
+    js_str = ""
+    css_str = ""
+
+    # 各扩展正常工作需要将它们所在的文件夹加入sys.path，这里返回的是修改前的sys.path
+    # Each extension adds folders to sys.path, but keep a path before
+    # sys_path = sys_path_for_extensions()
+
+    # global registered_extensions
+    # 拷贝下，避免修改了原字典
+    create_ui_extensions_dict_copy = registered_extensions.copy()
+
+    for extension_name, extension_ui in create_ui_extensions_dict_copy.items():
+
+        on_ui_tabs, on_app_started, extension_js_str, extension_css_str = extension_ui(extension_name)
+        if on_ui_tabs:
+            callbacks_ui_tabs.append(on_ui_tabs)
+        if on_app_started:
+            callbacks_app_started.append(on_app_started)
+        if extension_js_str:
+            js_str += extension_js_str
+        if extension_css_str:
+            css_str += extension_css_str
+
+    # modules_dir = os.path.join(shared.script_path, "modules")
+    script_js = os.path.join(script_path, "script.js")  # webui的js
+    js_str = javascript_html(script_js) + js_str  # webui的js要放在前面
+
+    # 先修改gradio，再创建demo，像SD-WebUI那样
+    routes.templates.TemplateResponse = reload_javascript(
+        routes.templates.TemplateResponse,
+        js=js_str,
+        css=css_str
+    )
+
+
 def on_ui_tabs():
     """ configures the ui on the tagger tab """
+    amend_ui()
     # If checkboxes misbehave you have to adapt the default.json preset
 
     with gr.Blocks(analytics_enabled=False) as tagger_interface:

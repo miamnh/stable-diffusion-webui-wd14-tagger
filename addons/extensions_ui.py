@@ -6,7 +6,7 @@ from typing import Tuple, Union, Callable
 import gradio as gr
 from fastapi import FastAPI
 
-from extensions.extensions_tools import (
+from addons.extension_tools import (
     extensions_dir,
     javascript_html,
     css_html,
@@ -31,13 +31,13 @@ def ui_sd_webui_infinite_image_browsing(
     # 扩展名字，即extensions文件夹中的文件夹名字:
     """ extension_name: the folder name, which is the extensions folder """
 
-    from extensions.sd_webui_infinite_image_browsing.scripts.iib.api \
+    from addons.sd_webui_infinite_image_browsing.scripts.iib.api \
         import send_img_path
-    from extensions.sd_webui_infinite_image_browsing.scripts.iib.tool \
+    from addons.sd_webui_infinite_image_browsing.scripts.iib.tool \
         import read_info_from_image
-    from extensions.sd_webui_infinite_image_browsing.scripts.iib.logger \
+    from addons.sd_webui_infinite_image_browsing.scripts.iib.logger \
         import logger
-    from extensions.sd_webui_infinite_image_browsing.app import AppUtils
+    from addons.sd_webui_infinite_image_browsing.app import AppUtils
     from PIL import Image
 
     title = "Infinite image browsing"  # 显示在SD-WebUI中的名字
