@@ -28,24 +28,15 @@ def unload_interrogators() -> List[str]:
     return (f'Successfully unload {unloaded_models} model(s)',)
 
 
-def check_for_errors(name) -> str:
-    errors = It.get_errors()
-    if not any(i.name == name for i in utils.interrogators.values()):
-        errors += f"'{name}': invalid interrogator"
-
-    return errors
-
-
 def on_interrogate(name: str, inverse=False) -> ItRetTP:
     if It.input["input_glob"] == '':
         return (None, None, None, 'No input directory selected')
 
-    err = check_for_errors(name)
-    if err != '':
-        return (None, None, None, err)
+    interrogator: It = next((i for i in utils.interrogators.values() if
+                             i.name == name), None)
+    if interrogator is None:
+        return (None, None, None, f"'{name}': invalid interrogator")
 
-    such_name = (i for i in utils.interrogators.values() if name == i.name)
-    interrogator: It = next(such_name, None)
     QData.inverse = inverse
     return interrogator.batch_interrogate()
 
@@ -55,7 +46,8 @@ def on_inverse_interrogate(name: str) -> Tuple[str, Dict[str, float], str]:
     return (ret[0], ret[2], ret[3])
 
 
-def on_interrogate_image(image: Image, interrogator: str) -> ItRetTP:
+
+def on_interrogate_image(image: Image, name: str) -> ItRetTP:
 
     # hack brcause image interrogaion occurs twice
     # It.odd_increment = It.odd_increment + 1
@@ -64,11 +56,11 @@ def on_interrogate_image(image: Image, interrogator: str) -> ItRetTP:
 
     if image is None:
         return (None, None, None, 'No image selected')
-    err = check_for_errors(interrogator)
-    if err != '':
-        return (None, None, None, err)
+    interrogator: It = next((i for i in utils.interrogators.values() if
+                             i.name == name), None)
+    if interrogator is None:
+        return (None, None, None, f"'{name}': invalid interrogator")
 
-    interrogator: It = utils.interrogators[interrogator]
     return interrogator.interrogate_image(image)
 
 
