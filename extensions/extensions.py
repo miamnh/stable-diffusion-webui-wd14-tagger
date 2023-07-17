@@ -9,19 +9,13 @@ from collections import OrderedDict
 
 from extensions.extensions_tools import extensions_dir
 from extensions.extensions_ui import (
-    ui_dataset_tag_editor_standalone,
-    ui_image_deduplicate_cluster_webui,
     ui_sd_webui_infinite_image_browsing,
-    ui_Gelbooru_API_Downloader,
 )
 
 # 注册的扩展名字列表，键名请保证与文件夹同名
 # List of registered extensions, please ensure key are as folder names
 registered_extensions = OrderedDict(
     sd_webui_infinite_image_browsing=ui_sd_webui_infinite_image_browsing,
-    image_deduplicate_cluster_webui=ui_image_deduplicate_cluster_webui,
-    dataset_tag_editor_standalone=ui_dataset_tag_editor_standalone,
-    Gelbooru_API_Downloader=ui_Gelbooru_API_Downloader,
 )
 
 
@@ -36,12 +30,6 @@ def disable_extensions(
     # when extensions_preload or registered_extensions key names change
     if cmd_opts_dict["disable_image_browsing"]:
         registered.pop("sd_webui_infinite_image_browsing")
-    if cmd_opts_dict["disable_deduplicate_cluster"]:
-        registered.pop("image_deduplicate_cluster_webui")
-    if cmd_opts_dict["disable_tag_editor"]:
-        registered.pop("dataset_tag_editor_standalone")
-    if cmd_opts_dict["disable_Gelbooru_Downloader"]:
-        registered.pop("Gelbooru_API_Downloader")
 
     return registered
 

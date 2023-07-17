@@ -2,8 +2,6 @@
 # 由 WSH032 慷慨提供: graciously provided by WSH032
 import os
 from typing import Tuple, Union, Callable
-import sys
-from pathlib import Path
 
 import gradio as gr
 from fastapi import FastAPI
@@ -25,37 +23,6 @@ from modules import shared
 # fail to start due to the failure of an extension
 
 
-def ui_image_deduplicate_cluster_webui(
-    extension_name: str
-) -> Tuple[Callable, Union[None, Callable], str, str]:
-
-    print("Build recurring clustering")  # 构建查重聚类
-
-    # 扩展名字，即extensions文件夹中的文件夹名字:
-    """ extension_name: the folder name, which is the extensions folder """
-
-    from extensions.image_deduplicate_cluster_webui \
-        import cluster_images, deduplicate_images
-
-    title = "Deduplicate-Cluster-Image"  # 显示在SD-WebUI中的名字: Displayed in
-    elem_id = "Deduplicate-Cluster-Image"  # htlm id
-
-    def create_demo():
-        with gr.Blocks() as demo:
-            with gr.TabItem("Deduplicate Images"):
-                deduplicate_images.demo.render()
-            with gr.TabItem("Cluster Images"):
-                cluster_images.demo.render()
-        return demo
-
-    js_str = ""
-    css_path = os.path.join(extensions_dir, extension_name, "style.css")
-    css_str = css_html(css_path)
-
-    def on_ui_tabs():
-        return (create_demo(), title, elem_id)
-
-    return on_ui_tabs, None, js_str, css_str
 
 
 def ui_sd_webui_infinite_image_browsing(
@@ -156,93 +123,3 @@ def ui_sd_webui_infinite_image_browsing(
     return on_ui_tabs, on_app_start, js_str, css_str
 
 
-def ui_dataset_tag_editor_standalone(
-    extension_name: str
-) -> Tuple[Callable, Union[None, Callable], str, str]:
-
-    print("Build tag editor")  # 构建tag editor
-
-    # 扩展名字，即extensions文件夹中的文件夹名字:
-    """ extension_name: the folder name, which is the extensions folder """
-
-    # scripts中的脚本以相对引用的方式import，所以这里要添加它们所在的路径:
-    # The scripts in scripts are imported in a relative reference manner,
-    # so the path where they are located must be added here:
-    scripts_dir = os.path.join(extensions_dir, extension_name, "scripts")
-    sys.path = [scripts_dir] + sys.path
-
-    from extensions.dataset_tag_editor_standalone.scripts.interface import (
-        tab_main,
-        tab_settings,
-        versions_html,
-        state,
-        settings,
-        paths,
-        utilities,
-        cleanup_tmpdr,
-    )
-
-    title = "Dataset Tag Editor"
-    elem_id = "dataset_tag_editor_interface"
-
-    state.begin()  # 设置成初始值，用于等候中断重启: Initial value for wait
-    settings.load()  # 载入设置: Load settings
-    paths.initialize()  # 创建路径: Create path
-
-    state.temp_dir = (utilities.base_dir_path() / "temp").absolute()
-    if settings.current.use_temp_files and settings.current.temp_directory != "":
-        state.temp_dir = Path(settings.current.temp_directory)
-
-    if settings.current.cleanup_tmpdir:
-        cleanup_tmpdr()  # 清理上一次的临时文件: Clean temp files of last time
-
-    def create_demo():
-        with gr.Blocks(title="Dataset Tag Editor") as demo:
-            with gr.Tab("Main"):
-                tab_main.on_ui_tabs()
-            with gr.Tab("Settings"):
-                tab_settings.on_ui_tabs()
-
-            gr.Textbox(elem_id="ui_created", value="", visible=False)
-
-            # 其实 versions_html() 中有一定的异常处理，但是这里再加一层:
-            # There is actually a certain amount of exception handling in
-            # versions_html(), but here is another layer:
-            try:
-                footer = f'<div class="versions">{versions_html()}</div>'
-            except Exception as e:
-                footer = f'<div class="versions">Error: {e}</div>'
-
-            gr.HTML(footer, elem_id="footer")
-        return demo
-
-    # js应该所在的文件夹: The folder where js should be
-    js_dir = os.path.join(extensions_dir, extension_name, "javascript")
-    # 该文件夹内所有js文件的绝对路径: The absolute path of all js files
-    js_str = dir_path2html(dir=js_dir, ext=".js", html_func=javascript_html)
-
-    # css应该所在的文件夹
-    css_dir = os.path.join(extensions_dir, extension_name, "css")
-    # 该文件夹内所有 css 文件的绝对路径: The absolute path of all css files
-    css_str = dir_path2html(dir=css_dir, ext=".css", html_func=css_html)
-
-    def on_ui_tabs():
-        return create_demo(), title, elem_id
-
-    return on_ui_tabs, None, js_str, css_str
-
-
-def ui_Gelbooru_API_Downloader(extension_name: str):
-
-    def not_implemented_error():
-        extension_name = "Gelbooru_API_Downloader"
-        # 的WebUI界面尚未实现:
-        print(f"Not_Implemented_Error: WebUI extension {extension_name}")
-        download_ps1_path = os.path.join(extensions_dir, extension_name,
-                                         "run_download_images_coroutine.ps1")
-        if os.path.exists(download_ps1_path):
-            # 如果要使用下载功能，请使用:
-            print(f"To download, please use:\n{download_ps1_path}")
-    not_implemented_error()
-
-    return None, None, "", ""
