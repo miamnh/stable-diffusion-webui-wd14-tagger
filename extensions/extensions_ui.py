@@ -14,6 +14,7 @@ from extensions.extensions_tools import (
 )
 from modules import shared
 
+
 # 把与各扩展有关的 import 都放在各自的函数里面
 # 因为有可能会有某个扩展缺失的清空，所以不需要导入该扩展的模块
 # 否则会应某个扩展失效而照成整个程序无法启动
@@ -21,10 +22,6 @@ from modules import shared
 # Because there may be an extension that is missing and cleared, there is no
 # need to import the module of the extension otherwise, the entire program will
 # fail to start due to the failure of an extension
-
-
-
-
 def ui_sd_webui_infinite_image_browsing(
     extension_name: str
 ) -> Tuple[Callable, Union[None, Callable], str, str]:
@@ -121,5 +118,3 @@ def ui_sd_webui_infinite_image_browsing(
         app_utils.wrap_app(app)
 
     return on_ui_tabs, on_app_start, js_str, css_str
-
-

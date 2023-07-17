@@ -1,5 +1,4 @@
 import argparse
-import logging
 # 由 WSH032 慷慨提供: graciously provided by WSH032
 
 # 插件不应依赖于modules.cmd_args中的参数
@@ -22,13 +21,6 @@ def preload_sd_webui_infinite_image_browsing(
     parser.add_argument("--disable_image_browsing", default=False,
                         action="store_true",
                         help="Disable sd_webui_infinite_image_browsing")
-
-
-
-
-
-
-
 
 # 注册的扩展名字列表: List of registered extension names
 registered_extensions_preload = {
