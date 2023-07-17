@@ -2,14 +2,12 @@
 import os
 from pathlib import Path
 import io
-from hashlib import sha256
 import json
-import numpy as np
 from platform import system
 from typing import Tuple, List, Dict, Callable
-from pandas import read_csv, read_json
+from pandas import read_csv
 from PIL import Image, UnidentifiedImageError
-from numpy import asarray, float32, expand_dims
+from numpy import asarray, float32, expand_dims, exp
 from tqdm import tqdm
 
 from huggingface_hub import hf_hub_download
@@ -19,6 +17,7 @@ from . import dbimutils
 from tagger import settings
 from tagger.uiset import QData, IOData, ItRetTP
 import gradio as gr
+from collections import defaultdict
 
 Its = settings.InterrogatorSettings
 
@@ -43,16 +42,6 @@ else:
             print('--device-id is not an integer')
 
 
-def get_file_interrogator_id(buf, interrogator_name):
-    hasher = sha256()
-    hasher.update(buf)
-    return str(hasher.hexdigest()) + interrogator_name
-
-
-def split_str(string: str, separator=',') -> List[str]:
-    return [x.strip() for x in string.split(separator) if x]
-
-
 class Interrogator:
     """ Interrogator class for tagger """
     # the raw input and output.
@@ -70,6 +59,7 @@ class Interrogator:
         "output_dir": '',
     }
     output = None
+    err = set()
     # odd_increment = 0
 
     @classmethod
@@ -78,8 +68,8 @@ class Interrogator:
             cls.input[key] = not cls.input[key]
         return toggle
 
-    @classmethod
-    def get_errors(cls) -> str:
+    @staticmethod
+    def get_errors() -> str:
         errors = ''
         if len(IOData.err) > 0:
             # write errors in html pointer list, every error in a <li> tag
@@ -97,15 +87,14 @@ class Interrogator:
                 if key in {'input_glob', 'output_dir'}:
                     getattr(IOData, "update_" + key)(val)
                 else:
-                    # remove any errors that might be fixed when the setting is changed
                     getattr(QData, "update_" + key)(val)
                 cls.input[key] = val
             return (cls.input[key], cls.get_errors())
 
         return setter
 
-    @classmethod
-    def load_image(cls, path: str) -> Image:
+    @staticmethod
+    def load_image(path: str) -> Image:
         try:
             return Image.open(path)
         except FileNotFoundError:
@@ -116,6 +105,12 @@ class Interrogator:
         except ValueError:
             print(f'${path} is not readable or StringIO')
         return None
+
+    @staticmethod
+    def get_image_dups() -> List[str]:
+        # first sort values so that those without a comma come first
+        ordered = sorted(QData.image_dups.items(), key=lambda x: ',' in x[0])
+        return [str(x) for s in ordered if len(s[1]) > 1 for x in s[1]]
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -203,6 +198,7 @@ class Interrogator:
                 output_dir.mkdir(0o755, True, True)
                 # next iteration we don't need to create the directory
                 IOData.paths[index][2] = ''
+        QData.image_dups[image_hash].add(path)
 
         abspath = str(path.absolute())
         fi_key = image_hash + self.name
@@ -214,6 +210,10 @@ class Interrogator:
             QData.in_db[i] = (abspath, out_path, '', {}, {})
         else:
             data = (abspath, out_path, fi_key) + self.interrogate(image)
+            # also the tags can indicate that the image is a duplicate
+            no_floats = filter(lambda x: not isinstance(x[0], float), data[3].items())
+            sorted_tags = ','.join(f'({k},{v:.1f})' for (k,v) in sorted(no_floats, key=lambda x: x[0]))
+            QData.image_dups[sorted_tags].add(abspath)
             QData.apply_filters(data)
             QData.had_new = True
 
@@ -221,6 +221,7 @@ class Interrogator:
         """ Interrogate all images in the input list """
         QData.tags.clear()
         QData.ratings.clear()
+        QData.image_dups.clear()
         if not Interrogator.input["cumulative"]:
             QData.in_db.clear()
 
@@ -251,6 +252,15 @@ class Interrogator:
 
         count = len(QData.query) - count
         Interrogator.output = QData.finalize_batch(count)
+        if len(Interrogator.get_image_dups()) > 0:
+            msg = "There were duplicates, see gallery tab"
+            Interrogator.err.add(msg)
+            Interrogator.output = (
+                Interrogator.output[0],
+                Interrogator.output[1],
+                Interrogator.output[2],
+                msg
+            )
         return Interrogator.output
 
     def interrogate(
@@ -483,7 +493,7 @@ class WaifuDiffusionInterrogator(Interrogator):
         # alpha to white
         image = dbimutils.fill_transparent(image)
 
-        image = np.asarray(image)
+        image = asarray(image)
         # PIL RGB to OpenCV BGR
         image = image[:, :, ::-1]
 
@@ -657,12 +667,12 @@ class MLDanbooruInterrogator(Interrogator):
             self.load()
 
         image = dbimutils.fill_transparent(image)
-        image = dbimutils.resize(image, 448) # TODO CUSTOMIZE
+        image = dbimutils.resize(image, 448)  # TODO CUSTOMIZE
 
-        x = np.asarray(image, dtype=np.float32) / 255
+        x = asarray(image, dtype=float32) / 255
         # HWC -> 1CHW
         x = x.transpose((2, 0, 1))
-        x = np.expand_dims(x, 0)
+        x = expand_dims(x, 0)
 
         input_ = self.model.get_inputs()[0]
         output = self.model.get_outputs()[0]
@@ -670,7 +680,7 @@ class MLDanbooruInterrogator(Interrogator):
         y, = self.model.run([output.name], {input_.name: x})
 
         # Softmax
-        y = 1 / (1 + np.exp(-y))
+        y = 1 / (1 + exp(-y))
 
         tags = {tag: float(conf) for tag, conf in zip(self.tags, y.flatten())}
         return {}, tags

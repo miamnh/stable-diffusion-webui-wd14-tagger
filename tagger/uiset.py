@@ -65,8 +65,8 @@ class IOData:
             cls.output_root = pout
             cls.set_batch_io(paths)
 
-    @classmethod
-    def get_bytes_hash(cls, data) -> str:
+    @staticmethod
+    def get_bytes_hash(data) -> str:
         """ get sha256 checksum of file """
         # Note: the checksum from an image is not the same as from file
         return sha256(data).hexdigest()
@@ -218,6 +218,7 @@ class QData:
     inverse = False
     had_new = False
     err = set()
+    image_dups = defaultdict(set)
 
     @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str]]:
@@ -300,8 +301,8 @@ class QData:
         if len(cls.add_tags) > count_threshold:
             shared.opts.tagger_count_threshold = len(cls.add_tags)
 
-    @classmethod
-    def compile_rex(cls, rex: str) -> Optional:
+    @staticmethod
+    def compile_rex(rex: str) -> Optional:
         if rex in {'', '^', '$', '^$'}:
             return None
         if rex[0] == '^':
@@ -541,6 +542,9 @@ class QData:
 
         # process the retrieved from db and add them to the stats
         for got in cls.in_db.values():
+            no_floats = filter(lambda x: not isinstance(x[0], float), got[3].items())
+            sorted_tags = ','.join(f'({k},{v:.1f})' for (k,v) in sorted(no_floats, key=lambda x: x[0]))
+            QData.image_dups[sorted_tags].add(got[0])
             cls.apply_filters(got)
 
         # average
@@ -548,8 +552,8 @@ class QData:
             return cls.finalize_inverse(count)
         return cls.finalize(count)
 
-    @classmethod
-    def sort_tags(cls, tags: Dict[str, float]) -> List[Tuple[str, float]]:
+    @staticmethod
+    def sort_tags(tags: Dict[str, float]) -> List[Tuple[str, float]]:
         """ sort tags by value, return list of tuples """
         return sorted(tags.items(), key=lambda x: x[1], reverse=True)
 

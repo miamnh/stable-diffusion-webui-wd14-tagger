@@ -45,6 +45,8 @@ def on_inverse_interrogate(name: str) -> Tuple[str, Dict[str, float], str]:
     ret = on_interrogate(name, True)
     return (ret[0], ret[2], ret[3])
 
+def on_gallery() -> List:
+    return It.get_image_dups()
 
 
 def on_interrogate_image(image: Image, name: str) -> ItRetTP:
@@ -301,6 +303,7 @@ def on_ui_tabs():
                 with gr.Tabs():
                     tab_include = gr.TabItem(label='Ratings and included tags')
                     tab_discard = gr.TabItem(label='Excluded tags')
+                    tab_gallery = gr.TabItem(label='Gallery')
                     with tab_include:
                         # clickable tags to populate excluded tags
                         tags = gr.HTML(
@@ -334,6 +337,20 @@ def on_ui_tabs():
                             label='Excluded Tag confidences',
                             elem_id='discard-tag-confidences',
                         )
+                    with tab_gallery:
+                        gallery = gr.Gallery(
+                            label='Gallery',
+                            elem_id='gallery',
+                        ).style(
+                            columns=[2],
+                            rows=[8],
+                            object_fit="contain",
+                            height="auto"
+                        )
+
+        tab_gallery.select(fn=on_gallery,
+                           inputs=[],
+                           outputs=[gallery])
 
         tab_include.select(fn=wrap_gradio_gpu_call(on_interrogate),
                            inputs=[interrogator],
