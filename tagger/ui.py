@@ -66,11 +66,12 @@ def on_interrogate_image(image: Image, name: str) -> ItRetTP:
     return interrogator.interrogate_image(image)
 
 
-def move_filter_to_input_fn(
+def move_selection_to_input(
     tag_search_filter: str,
     name: str,
     field: str
 ) -> Tuple[str, str, Dict[str, float], Dict[str, float], str]:
+    """ moves the selected to the input field """
     if It.output is None:
         return (None, None, None, None, '')
 
@@ -88,18 +89,18 @@ def move_filter_to_input_fn(
     return (It.input[field],) + ret
 
 
-def move_filter_to_keep_fn(
+def move_selection_to_keep(
     tag_search_filter: str, name: str
 ) -> Tuple[str, str, Dict[str, float], str]:
-    ret = move_filter_to_input_fn(tag_search_filter, name, "keep")
+    ret = move_selection_to_input(tag_search_filter, name, "keep")
     # ratings are not displayed on this tab
     return ('',) + ret[:2] + ret[3:]
 
 
-def move_filter_to_exclude_fn(
+def move_selection_to_exclude(
     tag_search_filter: str, name: str
 ) -> Tuple[str, str, Dict[str, float], Dict[str, float], str]:
-    return ('',) + move_filter_to_input_fn(tag_search_filter, name, "exclude")
+    return ('',) + move_selection_to_input(tag_search_filter, name, "exclude")
 
 
 def on_tag_search_filter_change(
@@ -287,11 +288,11 @@ def on_ui_tabs():
             with gr.Column(variant='panel'):
                 with gr.Row(variant='compact'):
                     with gr.Column(variant='compact'):
-                        move_filter_to_keep = gr.Button(
+                        mv_selection_to_keep = gr.Button(
                             value='Move visible tags to keep tags',
                             variant='secondary'
                         )
-                        move_filter_to_exclude = gr.Button(
+                        mv_selection_to_exclude = gr.Button(
                             value='Move visible tags to exclude tags',
                             variant='secondary'
                         )
@@ -362,14 +363,14 @@ def on_ui_tabs():
                            outputs=[discarded_tags, excluded_tag_confidences,
                                     info])
 
-        move_filter_to_keep.click(
-            fn=wrap_gradio_gpu_call(move_filter_to_keep_fn),
+        mv_selection_to_keep.click(
+            fn=wrap_gradio_gpu_call(move_selection_to_keep),
             inputs=[tag_search_selection, interrogator],
             outputs=[tag_search_selection, keep_tags, discarded_tags,
                      excluded_tag_confidences, info])
 
-        move_filter_to_exclude.click(
-            fn=wrap_gradio_gpu_call(move_filter_to_exclude_fn),
+        mv_selection_to_exclude.click(
+            fn=wrap_gradio_gpu_call(move_selection_to_exclude),
             inputs=[tag_search_selection, interrogator],
             outputs=[tag_search_selection, exclude_tags, tags,
                      rating_confidences, tag_confidences, info])
