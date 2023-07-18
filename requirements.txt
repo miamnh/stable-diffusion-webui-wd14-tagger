@@ -1,6 +1,7 @@
 deepdanbooru
 onnxruntime-silicon; sys_platform == 'darwin'
 onnxruntime-gpu; sys_platform != 'darwin'
+numba; sys_platform != 'darwin'
 fastapi
 gradio
 huggingface_hub
