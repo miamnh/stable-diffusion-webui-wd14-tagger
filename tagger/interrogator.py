@@ -133,7 +133,6 @@ class Interrogator:
             del self.model
             self.model = None
             unloaded = True
-            gr.collect()
             print(f'Unloaded {self.name}')
 
         if hasattr(self, 'tags'):
