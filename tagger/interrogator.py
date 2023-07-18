@@ -16,8 +16,6 @@ from modules import shared
 from . import dbimutils
 from tagger import settings
 from tagger.uiset import QData, IOData, ItRetTP
-import gradio as gr
-from collections import defaultdict
 
 Its = settings.InterrogatorSettings
 
@@ -30,9 +28,11 @@ use_cpu = ('all' in shared.cmd_opts.use_cpu) or (
 onnxrt_providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
 
 if use_cpu:
+    import gc
     TF_DEVICE_NAME = '/cpu:0'
     onnxrt_providers.pop(0)
 else:
+    from numba import cuda
     TF_DEVICE_NAME = '/gpu:0'
 
     if shared.cmd_opts.device_id is not None:
@@ -133,7 +133,6 @@ class Interrogator:
             del self.model
             self.model = None
             unloaded = True
-            gr.collect()
             print(f'Unloaded {self.name}')
 
         if hasattr(self, 'tags'):
@@ -144,13 +143,10 @@ class Interrogator:
 
     def interrogate_image(self, image: Image) -> ItRetTP:
         sha = IOData.get_bytes_hash(image.tobytes())
-        QData.tags.clear()
-        QData.ratings.clear()
-        if not Interrogator.input["cumulative"]:
-            QData.in_db.clear()
+        QData.clear(Interrogator.input["cumulative"])
+
         fi_key = sha + self.name
         count = 0
-        QData.for_tags_file.clear()
 
         if fi_key in QData.query:
             # this file was already queried for this interrogator.
@@ -323,24 +319,18 @@ class DeepDanbooruInterrogator(Interrogator):
             )
 
     def unload(self) -> bool:
-        # unloaded = super().unload()
+        if getattr(shared.opts, 'tagger_enable_unload', True):
+            unloaded = super().unload()
 
-        # if unloaded:
-        #     # tensorflow suck
-        #     # https://github.com/keras-team/keras/issues/2102
-        #     import tensorflow as tf
-        #     tf.keras.backend.clear_session()
-        #     gc.collect()
-
-        # return unloaded
-
-        # There is a bug in Keras where it is not possible to release a model
-        # that has been loaded into memory. Downgrading to keras==2.1.6 may
-        # solve the issue, but it may cause compatibility issues with other
-        # packages. Using subprocess to create a new process may also solve the
-        # problem, but it can be too complex (like Automatic1111 did). It seems
-        # that for now, the best option is to keep the model in memory, as most
-        # users use the Waifu Diffusion model with onnx.
+            if unloaded:
+                if use_cpu:
+                    import tensorflow as tf
+                    tf.keras.backend.clear_session()
+                    gc.collect()
+                else:
+                    device = cuda.get_current_device()
+                    device.reset()
+            return unloaded
         return False
 
     def interrogate(
@@ -383,6 +373,8 @@ class DeepDanbooruInterrogator(Interrogator):
         return ratings, tags
 
 
+# FIXME this is silly, in what scenario would the env change from MacOS to
+# another OS? TODO: remove if the author does not respond.
 def get_onnxrt():
     try:
         import onnxruntime
@@ -617,6 +609,17 @@ class WaifuDiffusionInterrogator(Interrogator):
             process_images(filepaths, image_list)
         QData.add_tag = orig_add_tags
         del os.environ["TF_XLA_FLAGS"]
+        # Again using tensorflow, let's try releasing the memory
+        if getattr(shared.opts, 'tagger_enable_unload', True):
+            unloaded = super().unload()
+
+            if unloaded:
+                if use_cpu:
+                    tf.keras.backend.clear_session()
+                    gc.collect()
+                else:
+                    device = cuda.get_current_device()
+                    device.reset()
         return ''
 
 
@@ -654,6 +657,7 @@ class MLDanbooruInterrogator(Interrogator):
 
         with open(self.tags_path, 'r', encoding='utf-8') as f:
             self.tags = json.load(f)
+
 
     def interrogate(
         self,

@@ -27,12 +27,26 @@ from addons.extension_tools import javascript_html
 
 def unload_interrogators() -> List[str]:
     unloaded_models = 0
+    remaining_models = ''
 
     for i in utils.interrogators.values():
         if i.unload():
             unloaded_models = unloaded_models + 1
+        elif i.model is not None:
+            if remaining_models == '':
+                remaining_models = f', remaining models:<ul><li>{i.name}</li>'
+            else:
+                remaining_models = remaining_models + f'<li>{i.name}</li>'
+    if remaining_models != '':
+        remaining_models = remaining_models + """
+</ul>Experimental: Settings -> Tagger -> Unload tensorflow models..<br>
+if no memory is released: <a href=
+"https://github.com/picobyte/stable-diffusion-webui-wd14-tagger/issues/17"
+target=”_blank”>issue</a> + OS, gpu/cpu, and nr of (V)RAM
+"""
+    QData.clear(1)
 
-    return (f'Successfully unload {unloaded_models} model(s)',)
+    return (f'{unloaded_models} model(s) unloaded{remaining_models}',)
 
 
 def on_interrogate(name: str, inverse=False) -> ItRetTP:

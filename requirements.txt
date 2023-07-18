@@ -15,6 +15,7 @@ opencv-python>=4.7.0.68
 huggingface_hub
 onnxruntime; sys_platform == 'darwin'
 onnxruntime-gpu; sys_platform != 'darwin'
+numba; sys_platform != 'darwin'
 tensorflow>=2.10.1, <2.11
 
 # for wd14-tagger

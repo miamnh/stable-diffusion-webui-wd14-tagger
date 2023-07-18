@@ -245,6 +245,25 @@ class QData:
                 cls.err.add(f'empty regex in {current} tags')
 
     @classmethod
+    def clear(cls, mode: int) -> None:
+        """ clear tags and ratings """
+        cls.tags.clear()
+        cls.ratings.clear()
+        cls.for_tags_file.clear()
+        if mode != 1:
+            cls.in_db.clear()
+        if mode == 2:
+            cls.json_db = None
+            cls.weighed = (defaultdict(list), defaultdict(list))
+            cls.query = {}
+            cls.add_tags = []
+            cls.keep_tags = set()
+            cls.exclude_tags = []
+            cls.search_tags = {}
+            cls.replace_tags = []
+            cls.imafe_dups.clear()
+
+    @classmethod
     def test_add(cls, tag: str, current: str, incompatble: list) -> None:
         """ check if there are incompatible collections """
         msg = f'Empty tag in {current} tags'
