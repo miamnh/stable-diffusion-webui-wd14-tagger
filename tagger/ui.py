@@ -5,6 +5,7 @@ from gradio import routes
 from PIL import Image
 from packaging import version
 import os
+import sys
 
 from modules import ui
 from modules import generation_parameters_copypaste as parameters_copypaste
@@ -172,10 +173,20 @@ def amend_ui() -> Tuple[gr.Blocks, List[Callable]]:
         css=css_str
     )
 
+    with gr.Blocks() as demo:
+        print("开始渲染UI")
+        for interface, label, ifid in interfaces_tuple_list:
+            with gr.Tab(label, id=ifid, elem_id=f"tab_{ifid}"):
+                interface.render()
+
+    if recover_sys_path:
+        sys.path = sys_path  # 恢复sys.path
+
+    return demo, callbacks_app_started
 
 def on_ui_tabs():
     """ configures the ui on the tagger tab """
-    amend_ui()
+    demo, callbacks = amend_ui()
     # If checkboxes misbehave you have to adapt the default.json preset
 
     with gr.Blocks(analytics_enabled=False) as tagger_interface:
@@ -402,7 +413,7 @@ def on_ui_tabs():
                         # Note: this elem_id is dapted inmy fork of the
                         # infinite image browsing component to avoid conflicts
                         # with the same extension on a webui tab.
-                        gr.HTML("error", elem_id="infinite_image_browsing_container_wrapper")
+                        gr.HTML("error", elem_id="tab_iib_container")
                         gallery = gr.Gallery(
                             label='Gallery',
                             elem_id='gallery',

@@ -1,17 +1,32 @@
-deepdanbooru
-onnxruntime-silicon; sys_platform == 'darwin'
-onnxruntime-gpu; sys_platform != 'darwin'
-fastapi
-gradio
-huggingface_hub
+# If you want to install with CUDA, please use the following command:
+
+# --extra-index-url https://download.pytorch.org/whl/cu118
+# torch==2.0.0+cu118
+# torchvision==0.15.1+cu118
+
+# for all or multiple
+torch
+gradio>=3.31.0 # <=3.35.2
+tqdm
+pillow
 numpy
-onnxruntime
+pandas
+opencv-python>=4.7.0.68
+huggingface_hub
+onnxruntime; sys_platform == 'darwin'
+onnxruntime-gpu; sys_platform != 'darwin'
+tensorflow>=2.10.1, <2.11
+
+# for wd14-tagger
+deepdanbooru
+fastapi
 opencv_contrib_python
-opencv_python
 opencv_python_headless
 packaging
-pandas
-Pillow
-tensorflow
 tensorflow_io
-tqdm
+
+# for sd-webui-infinite-image-browsing #
+fastapi
+uvicorn
+piexif
+python-dotenv
