@@ -12,6 +12,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from tagger import utils
 from tagger import api_models as models
 from tagger.uiset import QData
+from addons.sd_webui_infinite_image_browsing.app import AppUtils
 
 
 class Api:
@@ -49,6 +50,7 @@ class Api:
             methods=["POST"],
             response_model=str,
         )
+        AppUtils(base="tab_iib").wrap_app(app)
 
     def auth(self, creds: HTTPBasicCredentials = Depends(HTTPBasic())):
         if creds.username in self.credentials:

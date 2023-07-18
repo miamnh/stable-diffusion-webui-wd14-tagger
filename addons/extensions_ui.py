@@ -111,6 +111,7 @@ def ui_sd_webui_infinite_image_browsing(
     # Be sure to adapt to interface changes by the original author!!!
     def on_app_start(_: gr.Blocks, app: FastAPI):
         app_utils = AppUtils(
+            base="tab_iib",
             sd_webui_config=shared.cmd_opts.sd_webui_config,
             update_image_index=shared.cmd_opts.update_image_index,
             extra_paths=shared.cmd_opts.extra_paths,
