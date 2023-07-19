@@ -42,7 +42,23 @@ target=”_blank”>issue</a> + OS, gpu/cpu, and nr of (V)RAM
     return (f'{unloaded_models} model(s) unloaded{remaining_models}',)
 
 
-def on_interrogate(name: str, inverse=False) -> ItRetTP:
+def on_interrogate(
+    name: str, add_tags: str, keep_tags: str, exclude_tags: str,
+    search_tags: str, replace_tags: str, input_glob: str, output_dir: str,
+    inverse=False
+) -> ItRetTP:
+    for part in ["add", "keep", "exclude", "search", "replace"]:
+        val = locals()[part + "_tags"]
+        if val != It.input[part]:
+            getattr(QData, "update_" + part)(val)
+            It.input[part] = val
+
+    # input glob should always be rechecked for new files
+    IOData.update_input_glob(input_glob)
+    if output_dir != It.input["output_dir"]:
+        IOData.update_output_dir(output_dir)
+        It.input["output_dir"] = output_dir
+
     if It.input["input_glob"] == '':
         return (None, None, None, 'No input directory selected')
 
@@ -55,20 +71,29 @@ def on_interrogate(name: str, inverse=False) -> ItRetTP:
     return interrogator.batch_interrogate()
 
 
-def on_inverse_interrogate(name: str) -> Tuple[str, Dict[str, float], str]:
-    ret = on_interrogate(name, True)
+def on_inverse_interrogate(*args) -> Tuple[str, Dict[str, float], str]:
+    ret = on_interrogate(*args, True)
     return (ret[0], ret[2], ret[3])
+
 
 def on_gallery() -> List:
     return It.get_image_dups()
 
 
-def on_interrogate_image(image: Image, name: str) -> ItRetTP:
-
+def on_interrogate_image(
+    image: Image, name: str, add_tags: str, keep_tags: str, exclude_tags: str,
+    search_tags: str, replace_tags: str
+) -> ItRetTP:
     # hack brcause image interrogaion occurs twice
     # It.odd_increment = It.odd_increment + 1
     # if It.odd_increment & 1 == 1:
     #    return (None, None, None, '')
+
+    for part in ["add", "keep", "exclude", "search", "replace"]:
+        val = locals()[part + "_tags"]
+        if val != It.input[part]:
+            getattr(QData, "update_" + part)(val)
+            It.input[part] = val
 
     if image is None:
         return (None, None, None, 'No image selected')
@@ -81,9 +106,7 @@ def on_interrogate_image(image: Image, name: str) -> ItRetTP:
 
 
 def move_selection_to_input(
-    tag_search_filter: str,
-    name: str,
-    field: str
+    tag_search_filter: str, *args, field: str
 ) -> Tuple[str, str, Dict[str, float], Dict[str, float], str]:
     """ moves the selected to the input field """
     if It.output is None:
@@ -99,22 +122,22 @@ def move_selection_to_input(
 
     It.input[field] = ', '.join(add)
 
-    ret = on_interrogate(name, QData.inverse)
+    ret = on_interrogate(*args, QData.inverse)
     return (It.input[field],) + ret
 
 
 def move_selection_to_keep(
-    tag_search_filter: str, name: str
+    tag_search_filter: str, *args,
 ) -> Tuple[str, str, Dict[str, float], str]:
-    ret = move_selection_to_input(tag_search_filter, name, "keep")
+    ret = move_selection_to_input(tag_search_filter, *args, "keep")
     # ratings are not displayed on this tab
     return ('',) + ret[:2] + ret[3:]
 
 
 def move_selection_to_exclude(
-    tag_search_filter: str, name: str
+    tag_search_filter: str, *args,
 ) -> Tuple[str, str, Dict[str, float], Dict[str, float], str]:
-    return ('',) + move_selection_to_input(tag_search_filter, name, "exclude")
+    return ('',) + move_selection_to_input(tag_search_filter, *args, "exclude")
 
 
 def on_tag_search_filter_change(
@@ -367,38 +390,11 @@ def on_ui_tabs():
                            inputs=[],
                            outputs=[gallery])
 
-        tab_include.select(fn=wrap_gradio_gpu_call(on_interrogate),
-                           inputs=[interrogator],
-                           outputs=[tags, rating_confidences, tag_confidences,
-                                    info])
-
-        tab_discard.select(fn=wrap_gradio_gpu_call(on_inverse_interrogate),
-                           inputs=[interrogator],
-                           outputs=[discarded_tags, excluded_tag_confidences,
-                                    info])
-
-        mv_selection_to_keep.click(
-            fn=wrap_gradio_gpu_call(move_selection_to_keep),
-            inputs=[tag_search_selection, interrogator],
-            outputs=[tag_search_selection, keep_tags, discarded_tags,
-                     excluded_tag_confidences, info])
-
-        mv_selection_to_exclude.click(
-            fn=wrap_gradio_gpu_call(move_selection_to_exclude),
-            inputs=[tag_search_selection, interrogator],
-            outputs=[tag_search_selection, exclude_tags, tags,
-                     rating_confidences, tag_confidences, info])
-
         cumulative.input(fn=It.flip('cumulative'), inputs=[], outputs=[])
         large_query.input(fn=It.flip('large_query'), inputs=[], outputs=[])
         unload_after.input(fn=It.flip('unload_after'), inputs=[], outputs=[])
 
         save_tags.input(fn=IOData.flip_save_tags(), inputs=[], outputs=[])
-
-        input_glob.blur(fn=wrap_gradio_gpu_call(It.set("input_glob")),
-                        inputs=[input_glob], outputs=[input_glob, info])
-        output_dir.blur(fn=wrap_gradio_gpu_call(It.set("output_dir")),
-                        inputs=[output_dir], outputs=[output_dir, info])
 
         threshold.input(fn=QData.set("threshold"), inputs=[threshold],
                         outputs=[])
@@ -422,6 +418,11 @@ def on_ui_tabs():
                          inputs=[search_tags], outputs=[search_tags, info])
         replace_tags.blur(fn=wrap_gradio_gpu_call(It.set('replace')),
                           inputs=[replace_tags], outputs=[replace_tags, info])
+
+        input_glob.blur(fn=wrap_gradio_gpu_call(It.set("input_glob")),
+                        inputs=[input_glob], outputs=[input_glob, info])
+        output_dir.blur(fn=wrap_gradio_gpu_call(It.set("output_dir")),
+                        inputs=[output_dir], outputs=[output_dir, info])
 
         # register events
         tag_search_selection.change(
@@ -454,19 +455,46 @@ def on_ui_tabs():
 
         unload_all_models.click(fn=unload_interrogators, outputs=[info])
 
+        common_input = [interrogator, add_tags, keep_tags, exclude_tags,
+                        search_tags, replace_tags]
         image.change(
             fn=wrap_gradio_gpu_call(on_interrogate_image),
-            inputs=[image, interrogator],
+            inputs=[image] + common_input,
             outputs=[tags, rating_confidences, tag_confidences, info])
 
         image_submit.click(
             fn=wrap_gradio_gpu_call(on_interrogate_image),
-            inputs=[image, interrogator],
+            inputs=[image] + common_input,
             outputs=[tags, rating_confidences, tag_confidences, info])
+
+        common_input += [input_glob, output_dir]
+
+        # FIXME: after image interrogation, what about exclusion tab there?
+        tab_include.select(fn=wrap_gradio_gpu_call(on_interrogate),
+                           inputs=common_input,
+                           outputs=[tags, rating_confidences, tag_confidences,
+                                    info])
+
+        tab_discard.select(fn=wrap_gradio_gpu_call(on_inverse_interrogate),
+                           inputs=common_input,
+                           outputs=[discarded_tags, excluded_tag_confidences,
+                                    info])
+
+        mv_selection_to_keep.click(
+            fn=wrap_gradio_gpu_call(move_selection_to_keep),
+            inputs=[tag_search_selection] + common_input,
+            outputs=[tag_search_selection, keep_tags, discarded_tags,
+                     excluded_tag_confidences, info])
+
+        mv_selection_to_exclude.click(
+            fn=wrap_gradio_gpu_call(move_selection_to_exclude),
+            inputs=[tag_search_selection] + common_input,
+            outputs=[tag_search_selection, exclude_tags, tags,
+                     rating_confidences, tag_confidences, info])
 
         batch_submit.click(
             fn=wrap_gradio_gpu_call(on_interrogate),
-            inputs=[interrogator],
+            inputs=common_input,
             outputs=[tags, rating_confidences, tag_confidences, info])
 
     return [(tagger_interface, "Tagger", "tagger")]

@@ -54,7 +54,6 @@ class Interrogator:
         "exclude": '',
         "search": '',
         "replace": '',
-        "paths": '',
         "input_glob": '',
         "output_dir": '',
     }

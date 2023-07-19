@@ -38,7 +38,7 @@ ItRetTP = Tuple[
 
 class IOData:
     """ data class for input and output paths """
-    last_input_glob = None
+    last_path_mtimes = None
     base_dir = None
     output_root = None
     paths = []
@@ -90,18 +90,15 @@ class IOData:
     def update_input_glob(cls, input_glob: str) -> None:
         """ update input glob pattern, and set input and output paths """
         input_glob = input_glob.strip()
-        if input_glob == cls.last_input_glob:
-            print('input glob did not change')
-            return
-        last_input_glob = input_glob
 
-        cls.paths = []
+        paths = []
 
         # if there is no glob pattern, insert it automatically
         if not input_glob.endswith('*'):
             if not input_glob.endswith(os.sep):
                 input_glob += os.sep
             input_glob += '*'
+
         # get root directory of input glob pattern
         base_dir = input_glob.replace('?', '*')
         base_dir = base_dir.split(os.sep + '*').pop(0)
@@ -110,6 +107,22 @@ class IOData:
             cls.err.add(msg)
             return
         cls.err.discard(msg)
+
+        recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
+        path_mtimes = []
+        for filename in glob(input_glob, recursive=recursive):
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in supported_extensions:
+                path_mtimes.append(os.path.getmtime(filename))
+                paths.append(filename)
+            elif ext != '.txt' and 'db.json' not in filename:
+                print(f'{filename}: not an image extension: "{ext}"')
+
+        # Just info, no need to update paths
+        if cls.last_path_mtimes == path_mtimes:
+            print('No changed images')
+            return
+        cls.last_path_mtimes = path_mtimes
 
         if cls.output_root is None:
             output_dir = base_dir
@@ -122,67 +135,59 @@ class IOData:
         cls.base_dir = base_dir
         QData.read_json(cls.output_root)
 
-        recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
-        paths = glob(input_glob, recursive=recursive)
         print(f'found {len(paths)} image(s)')
         cls.set_batch_io(paths)
         if len(cls.err) == 0:
-            cls.last_input_glob = last_input_glob
+            cls.last_paths = paths
             QData.tags.clear()
             QData.ratings.clear()
             QData.in_db.clear()
 
-        return
-
     @classmethod
-    def set_batch_io(cls, paths: List[Path]) -> None:
+    def set_batch_io(cls, paths: List[str]) -> None:
         """ set input and output paths for batch mode """
         checked_dirs = set()
         for path in paths:
-            ext = os.path.splitext(path)[1].lower()
-            if ext in supported_extensions:
-                path = Path(path)
-                if not cls.save_tags:
-                    cls.paths.append([path, '', ''])
-                    continue
+            path = Path(path)
+            if not cls.save_tags:
+                cls.paths.append([path, '', ''])
+                continue
 
-                # guess the output path
-                base_dir_last_idx = path.parts.index(cls.base_dir_last)
-                # format output filename
+            # guess the output path
+            base_dir_last_idx = path.parts.index(cls.base_dir_last)
+            # format output filename
 
-                info = tags_format.Info(path, 'txt')
-                fmt = partial(lambda info, m: tags_format.parse(m, info), info)
+            info = tags_format.Info(path, 'txt')
+            fmt = partial(lambda info, m: tags_format.parse(m, info), info)
 
-                msg = 'Invalid output format'
-                cls.err.discard(msg)
-                try:
-                    formatted_output_filename = tags_format.pattern.sub(
-                        fmt,
-                        Its.output_filename_format
-                    )
-                except (TypeError, ValueError):
-                    cls.err.add(msg)
+            msg = 'Invalid output format'
+            cls.err.discard(msg)
+            try:
+                formatted_output_filename = tags_format.pattern.sub(
+                    fmt,
+                    Its.output_filename_format
+                )
+            except (TypeError, ValueError):
+                cls.err.add(msg)
 
-                output_dir = cls.output_root.joinpath(
-                    *path.parts[base_dir_last_idx + 1:]).parent
+            output_dir = cls.output_root.joinpath(
+                *path.parts[base_dir_last_idx + 1:]).parent
 
-                tags_out = output_dir.joinpath(formatted_output_filename)
+            tags_out = output_dir.joinpath(formatted_output_filename)
 
-                if output_dir in checked_dirs:
-                    cls.paths.append([path, tags_out, ''])
-                else:
-                    checked_dirs.add(output_dir)
-                    if os.path.exists(output_dir):
-                        msg = 'output_dir: not a directory.'
-                        if os.path.isdir(output_dir):
-                            cls.paths.append([path, tags_out, ''])
-                            cls.err.discard(msg)
-                        else:
-                            cls.err.add(msg)
+            if output_dir in checked_dirs:
+                cls.paths.append([path, tags_out, ''])
+            else:
+                checked_dirs.add(output_dir)
+                if os.path.exists(output_dir):
+                    msg = 'output_dir: not a directory.'
+                    if os.path.isdir(output_dir):
+                        cls.paths.append([path, tags_out, ''])
+                        cls.err.discard(msg)
                     else:
-                        cls.paths.append([path, tags_out, output_dir])
-            elif ext != '.txt' and 'db.json' not in path:
-                print(f'{path}: not an image extension: "{ext}"')
+                        cls.err.add(msg)
+                else:
+                    cls.paths.append([path, tags_out, output_dir])
 
 
 def get_i_wt(stored: float) -> Tuple[int, float]:
