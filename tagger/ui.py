@@ -13,6 +13,11 @@ from tagger import utils
 from tagger.interrogator import Interrogator as It
 from tagger.uiset import IOData, QData, ItRetTP
 
+from addons import extensions_ui
+
+
+IIB_BLOCKS: gr.Blocks = extensions_ui.on_ui_tabs()[0]
+
 
 # issues:
 # exclude tags are not excluded from the tags .txt files
@@ -354,10 +359,14 @@ def on_ui_tabs():
                             elem_id='discard-tag-confidences',
                         )
                     with tab_gallery:
-                        # Note: this elem_id is dapted inmy fork of the
+                        # Note: this elem_id is dapted in my fork of the
                         # infinite image browsing component to avoid conflicts
                         # with the same extension on a webui tab.
-                        gr.HTML("error", elem_id="tab_iib_container")
+                        """
+                        Sean Wang: you dont need change this elem_id in your fork, iib author will fix the confliction
+                        https://github.com/zanllp/sd-webui-infinite-image-browsing/issues/322#issuecomment-1639385703
+                        """
+                        IIB_BLOCKS.render()  # create the iib blocks
                         gallery = gr.Gallery(
                             label='Gallery',
                             elem_id='gallery',
