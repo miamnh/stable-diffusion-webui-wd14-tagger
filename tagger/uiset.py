@@ -30,8 +30,10 @@ supported_extensions = {
 # interrogator return type
 ItRetTP = Tuple[
     str,               # tags as string
+    str,               # discarded tags as string
     Dict[str, float],  # rating confidences
     Dict[str, float],  # tag confidences
+    Dict[str, float],  # excluded tag confidences
     str,               # error message
 ]
 
@@ -44,6 +46,11 @@ class IOData:
     paths = []
     save_tags = True
     err = set()
+
+    @classmethod
+    def error_msg(cls) -> str:
+        return "Errors:<ul>" + ''.join(f'<li>{x}</li>' for x in cls.err) + \
+               "</ul>"
 
     @classmethod
     def flip_save_tags(cls) -> callable:
@@ -118,10 +125,16 @@ class IOData:
             elif ext != '.txt' and 'db.json' not in filename:
                 print(f'{filename}: not an image extension: "{ext}"')
 
-        # Just info, no need to update paths
+        cls.base_dir_last = Path(base_dir).parts[-1]
+        cls.base_dir = base_dir
+
         if cls.last_path_mtimes == path_mtimes:
             print('No changed images')
             return
+
+        QData.tags.clear()
+        QData.ratings.clear()
+        QData.in_db.clear()
         cls.last_path_mtimes = path_mtimes
 
         if cls.output_root is None:
@@ -131,17 +144,10 @@ class IOData:
         elif not cls.output_root or cls.output_root == Path(cls.base_dir):
             cls.output_root = Path(base_dir)
 
-        cls.base_dir_last = Path(base_dir).parts[-1]
-        cls.base_dir = base_dir
         QData.read_json(cls.output_root)
 
         print(f'found {len(paths)} image(s)')
         cls.set_batch_io(paths)
-        if len(cls.err) == 0:
-            cls.last_paths = paths
-            QData.tags.clear()
-            QData.ratings.clear()
-            QData.in_db.clear()
 
     @classmethod
     def set_batch_io(cls, paths: List[str]) -> None:
@@ -217,10 +223,10 @@ class QData:
     # representing the (cumulative) current interrogations
     ratings = defaultdict(float)
     tags = defaultdict(list)
+    discarded_tags = defaultdict(list)
     in_db = {}
     for_tags_file = defaultdict(lambda: defaultdict(float))
 
-    inverse = False
     had_new = False
     err = set()
     image_dups = defaultdict(set)
@@ -253,6 +259,7 @@ class QData:
     def clear(cls, mode: int) -> None:
         """ clear tags and ratings """
         cls.tags.clear()
+        cls.discarded_tags.clear()
         cls.ratings.clear()
         cls.for_tags_file.clear()
         if mode != 1:
@@ -470,29 +477,12 @@ class QData:
         return tag
 
     @classmethod
-    def inverse_apply_filters(cls, tags: List[Tuple[str, float]]) -> None:
-        """ inverse: List all tags marked for exclusion """
-        for tag, val in tags:
-            tag = cls.correct_tag(tag)
-
-            if tag in cls.keep_tags or tag in cls.add_tags:
-                continue
-
-            if cls.is_excluded(tag) or val < cls.threshold:
-                cls.tags[tag].append(val)
-
-    @classmethod
-    def apply_filters(cls, data) -> Set[str]:
+    def apply_filters(cls, data) -> None:
         """ apply filters to query data, store in db.json if required """
         # data = (path, fi_key, tags, ratings, new)
         # fi_key == '' means this is a new file or interrogation for that file
 
         tags = sorted(data[4].items(), key=lambda x: x[1], reverse=True)
-        if cls.inverse:
-            cls.inverse_apply_filters(tags)
-            return
-
-        # not inverse: display all tags marked for inclusion
 
         fi_key = data[2]
         index = len(cls.query)
@@ -521,6 +511,8 @@ class QData:
                 tag = cls.correct_tag(tag)
                 if tag not in cls.keep_tags:
                     if cls.is_excluded(tag) or val < cls.threshold:
+                        if tag not in cls.add_tags:
+                            cls.discarded_tags[tag].append(val)
                         continue
                 if data[1] != '':
                     current = cls.for_tags_file[data[1]].get(tag, 0.0)
@@ -561,8 +553,6 @@ class QData:
             cls.apply_filters(got)
 
         # average
-        if cls.inverse:
-            return cls.finalize_inverse(count)
         return cls.finalize(count)
 
     @staticmethod
@@ -573,11 +563,12 @@ class QData:
     @classmethod
     def finalize(cls, count: int) -> ItRetTP:
         """ finalize the query, return the results """
+
         count += len(cls.in_db)
         if count == 0:
-            return [None, None, None, 'no results for query']
+            return None, None, None, None, None, 'no results for query'
 
-        tags_str, ratings, tags = '', {}, {}
+        tags_str, lose_str, ratings, tags, discarded_tags = '', '', {}, {}, {}
 
         for val in cls.for_tags_file.values():
             for k in cls.add_tags:
@@ -602,10 +593,19 @@ class QData:
                 tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
                             f"""true)'>{escaped}</a>"""
             else:
+                discarded_tags[k] = sum(lst) / count
+                lose_str += f""", <a href='javascript:tag_clicked("{k}", """\
+                            f"""false)'>{k}</a>"""
                 for remaining_tags in cls.for_tags_file.values():
                     if k in remaining_tags:
                         if k not in cls.add_tags and k not in cls.keep_tags:
                             del remaining_tags[k]
+
+        for k, lst in cls.discarded_tags.items():
+            fraction_of_queries = len(lst) / count
+            discarded_tags[k] = sum(lst) / count
+            lose_str += f""", <a href='javascript:tag_clicked("{k}", """\
+                        f"""false)'>{k}</a>"""
 
         for ent, val in cls.ratings.items():
             ratings[ent] = val / count
@@ -620,30 +620,9 @@ class QData:
                 sorted_tags = [k for k, v in sorted_tags]
             file.write_text(', '.join(sorted_tags), encoding='utf-8')
 
-        print('all done :)')
-        return (tags_str[2:], ratings, tags, '')
+        warn = ""
+        if len(QData.err) > 0:
+            warn = "Warnings (fix and try again - it should be cheap):<ul>" + \
+                   ''.join([f'<li>{x}</li>' for x in QData.err]) + "</ul>"
 
-    @classmethod
-    def finalize_inverse(cls, count: int) -> ItRetTP:
-        """ finalize the query, return the results """
-        count += len(cls.in_db)
-        if count == 0:
-            return [None, None, None, 'no results for query']
-
-        tags_str, ratings, tags = '', {}, {}
-
-        for k, lst in cls.tags.items():
-            # len(!) fraction of the all interrogations was above the threshold
-            fraction_of_queries = len(lst) / count
-
-            if fraction_of_queries < cls.tag_frac_threshold:
-                # store the average of those interrogations sum(!) / count
-                tags[k] = sum(lst) / count
-                # trigger an event to place the tag in the active tags list
-                # replace if k interferes with html code
-                escaped = html_escape(k)
-                tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
-                            f"""false)'>{escaped}</a>"""
-
-        print('all done :)')
-        return (tags_str[2:], ratings, tags, '')
+        return tags_str[2:], lose_str[2:], ratings, tags, discarded_tags, warn

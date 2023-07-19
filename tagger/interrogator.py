@@ -54,11 +54,10 @@ class Interrogator:
         "exclude": '',
         "search": '',
         "replace": '',
-        "input_glob": '',
         "output_dir": '',
     }
     output = None
-    err = set()
+    message = ''
     # odd_increment = 0
 
     @classmethod
@@ -72,8 +71,7 @@ class Interrogator:
         errors = ''
         if len(IOData.err) > 0:
             # write errors in html pointer list, every error in a <li> tag
-            errors = 'Input/Output errors:<br><ul><li>' + \
-                     '</li><li>'.join(IOData.err) + '</li></ul>'
+            errors = IOData.error_msg()
         if len(QData.err) > 0:
             errors += 'Fix to write correct output:<br><ul><li>' + \
                       '</li><li>'.join(QData.err) + '</li></ul>'
@@ -82,15 +80,22 @@ class Interrogator:
     @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str, str]]:
         def setter(val) -> Tuple[str, str]:
-            if val != cls.input[key]:
-                if key in {'input_glob', 'output_dir'}:
-                    getattr(IOData, "update_" + key)(val)
-                else:
-                    getattr(QData, "update_" + key)(val)
+            if key == 'input_glob':
+                IOData.update_input_glob(val)
+                return (val, cls.get_errors())
+            if key == val != cls.input[key]:
+                tgt_cls = IOData if key == 'output_dir' else QData
+                getattr(tgt_cls, "update_" + key)(val)
                 cls.input[key] = val
             return (cls.input[key], cls.get_errors())
 
         return setter
+
+    @classmethod
+    def error(cls, new_msg=None) -> ItRetTP:
+        if new_msg is not None:
+            cls.message = new_msg
+        return None, None, None, None, None, cls.message
 
     @staticmethod
     def load_image(path: str) -> Image:
@@ -120,9 +125,7 @@ class Interrogator:
     def load(self):
         raise NotImplementedError()
 
-    def large_batch_interrogate(
-        self, images: List, dry_run=False
-    ) -> List[ItRetTP]:
+    def large_batch_interrogate(self, images: List, dry_run=False) -> str:
         raise NotImplementedError()
 
     def unload(self) -> bool:
@@ -164,11 +167,10 @@ class Interrogator:
         for got in QData.in_db.values():
             QData.apply_filters(got)
 
-        if QData.inverse:
-            Interrogator.output = QData.finalize_inverse(count)
-        else:
-            Interrogator.output = QData.finalize(count)
+        Interrogator.output = QData.finalize(count)
+        Interrogator.message = Interrogator.output[-1]
         return Interrogator.output
+
 
     def batch_interrogate_image(self, index: int) -> None:
         # if outputpath is '', no tags file will be written
@@ -225,15 +227,13 @@ class Interrogator:
             image_list = [str(x[0].resolve()) for x in IOData.paths]
             err = self.large_batch_interrogate(image_list, self.run_mode == 0)
             if err:
-                return (None, None, None, err)
+                return Interrogator.error(err)
 
             # alternating dry run and run modes
             self.run_mode = (self.run_mode + 1) % 2
             count = len(image_list)
-            if QData.inverse:
-                Interrogator.output = QData.finalize_inverse(count)
-            else:
-                Interrogator.output = QData.finalize(count)
+            Interrogator.output = QData.finalize(count)
+            Interrogator.message = Interrogator.output[-1]
             return Interrogator.output
 
         verbose = getattr(shared.opts, 'tagger_verbose', True)
@@ -249,13 +249,13 @@ class Interrogator:
         Interrogator.output = QData.finalize_batch(count)
         if len(Interrogator.get_image_dups()) > 0:
             msg = "There were duplicates, see gallery tab"
-            Interrogator.err.add(msg)
             Interrogator.output = (
                 Interrogator.output[0],
                 Interrogator.output[1],
                 Interrogator.output[2],
                 msg
             )
+        Interrogator.message = Interrogator.output[-1]
         return Interrogator.output
 
     def interrogate(
