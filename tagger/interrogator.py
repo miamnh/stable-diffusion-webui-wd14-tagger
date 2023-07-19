@@ -408,7 +408,7 @@ class WaifuDiffusionInterrogator(Interrogator):
         model_path='model.onnx',
         tags_path='selected_tags.csv',
         repo_id=None,
-        from_github=False,
+        is_hf=True,
     ) -> None:
         super().__init__(name)
         self.repo_id = repo_id
@@ -417,26 +417,31 @@ class WaifuDiffusionInterrogator(Interrogator):
         self.tags = None
         self.model = None
         self.tags = None
-        self.from_github = from_github
+        self.local_model = None
+        self.local_tags = None
+        self.is_hf = is_hf
 
     def download(self) -> None:
         mdir = Path(shared.models_path, 'interrogators')
-        if self.repo_id is not None and not self.from_github:
+        if self.is_hf:
             print(f"Loading {self.name} model file from {self.repo_id}, {self.model_path}")
 
-            self.model_path = hf_hub_download(
+            model_path = hf_hub_download(
                 self.repo_id,
                 self.model_path,
                 cache_dir=mdir)
-            self.tags_path = hf_hub_download(
+            tags_path = hf_hub_download(
                 self.repo_id,
                 self.tags_path,
                 cache_dir=mdir)
+        else:
+            model_path = self.local_model
+            tags_path = self.local_tags
 
         download_model = {
             'name': self.name,
-            'model_path': self.model_path,
-            'tags_path': self.tags_path,
+            'model_path': model_path,
+            'tags_path': tags_path,
         }
         mpath = Path(mdir, 'model.json')
 
@@ -454,15 +459,16 @@ class WaifuDiffusionInterrogator(Interrogator):
 
         with io.open(mpath, 'w') as filename:
             json.dump(data, filename)
+        return model_path, tags_path
 
     def load(self) -> None:
-        self.download()
+        model_path, tags_path = self.download()
         ort = get_onnxrt()
-        self.model = ort.InferenceSession(self.model_path,
+        self.model = ort.InferenceSession(model_path,
                                           providers=onnxrt_providers)
 
         print(f'Loaded {self.name} model from {self.repo_id}')
-        self.tags = read_csv(self.tags_path)
+        self.tags = read_csv(tags_path)
 
     def interrogate(
         self,
@@ -629,7 +635,7 @@ class MLDanbooruInterrogator(Interrogator):
         name: str,
         repo_id: str,
         model_path: str,
-        tags_path='classes.json'
+        tags_path='classes.json',
     ) -> None:
         super().__init__(name)
         self.model_path = model_path
