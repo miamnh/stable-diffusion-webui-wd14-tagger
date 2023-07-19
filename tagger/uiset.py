@@ -400,9 +400,6 @@ class QData:
                         cls.err.add(msg)
                     else:
                         cls.err.discard(msg)
-                for key in ["add", "keep", "exclude", "search", "replace"]:
-                    if key in data and data[key] != '':
-                        getattr(cls, f"update_{key}")(data[key])
                 cls.weighed = (
                     defaultdict(list, data["rating"]),
                     defaultdict(list, data["tag"])
@@ -415,18 +412,10 @@ class QData:
     def write_json(cls) -> None:
         """ write db.json """
         if cls.json_db is not None:
-            search = sorted(cls.search_tags.items(), key=lambda x: x[0])
-            search = [x[1].pattern for x in search]
-            exclude = [x.pattern for x in cls.exclude_tags]
             data = {
                 "rating": cls.weighed[0],
                 "tag": cls.weighed[1],
                 "query": cls.query,
-                "add": ','.join(cls.add_tags),
-                "keep": ','.join(cls.keep_tags),
-                "exclude": ','.join(exclude),
-                "search": ','.join([x[1] for x in search]),
-                "repl": ','.join(cls.replace_tags)
             }
             cls.json_db.write_text(dumps(data, indent=2))
             print(f'Wrote {cls.json_db}: {len(cls.query)} interrogations, '
