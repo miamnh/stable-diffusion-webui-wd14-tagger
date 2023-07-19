@@ -38,6 +38,10 @@ interrogators: Dict[str, Interrogator] = {
         # again misleading name
         repo_id='SmilingWolf/wd-v1-4-swinv2-tagger-v2',
     ),
+    'wd-v1-4-moat-tagger.v2': WaifuDiffusionInterrogator(
+        'WD14 moat tagger v2',
+        repo_id='SmilingWolf/wd-v1-4-moat-tagger-v2'
+    ),
     'mld-caformer.dec-5-97527': MLDanbooruInterrogator(
         'ML-Danbooru Caformer dec-5-97527',
         repo_id='deepghs/ml-danbooru-onnx',
@@ -47,10 +51,6 @@ interrogators: Dict[str, Interrogator] = {
         'ML-Danbooru TResNet-D 6-30000',
         repo_id='deepghs/ml-danbooru-onnx',
         model_path='TResnet-D-FLq_ema_6-30000.onnx'
-    ),
-    'wd-v1-4-moat-tagger.v2': WaifuDiffusionInterrogator(
-        'WD14 moat tagger v2',
-        repo_id='SmilingWolf/wd-v1-4-moat-tagger-v2'
     ),
 }
 
@@ -86,7 +86,7 @@ def refresh_interrogators() -> List[str]:
         if len(onnx_files) != 1:
             print(f"Warning: {path} requires exactly one .onnx model, skipped")
             continue
-        model_path = Path(path, onnx_files[0].name)
+        local_path = Path(path, onnx_files[0].name)
 
         csv = [x for x in os.scandir(path) if x.name.endswith('.csv')]
         if len(csv) == 0:
@@ -104,17 +104,17 @@ def refresh_interrogators() -> List[str]:
                 interrogators[path.name] = WaifuDiffusionInterrogator(
                     path.name,
                     repo_id='SmilingWolf/SW-CV-ModelZoo',
-                    from_github=True
+                    is_hf=False
                 )
             elif path.name == 'Z3D-E621-Convnext':
                 interrogators[path.name] = WaifuDiffusionInterrogator(
-                    'Z3D-E621-Convnext')
+                    'Z3D-E621-Convnext', is_hf=False)
             else:
                 raise NotImplementedError(f"Add {path.name} resolution similar"
                                           "to above here")
 
-        interrogators[path.name].model_path = str(model_path)
-        interrogators[path.name].tags_path = str(tags_path)
+        interrogators[path.name].local_model = str(local_path)
+        interrogators[path.name].local_tags = str(tags_path)
 
     return sorted(interrogators.keys())
 
