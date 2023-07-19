@@ -654,14 +654,14 @@ class MLDanbooruInterrogator(Interrogator):
         return model_path, tags_path
 
     def load(self) -> None:
-        self.model_path, self.tags_path = self.download()
+        model_path, tags_path = self.download()
 
         ort = get_onnxrt()
-        self.model = ort.InferenceSession(self.model_path, providers=onnxrt_providers)
+        self.model = ort.InferenceSession(model_path, providers=onnxrt_providers)
 
-        print(f'Loaded {self.name} model from {self.model_path}')
+        print(f'Loaded {self.name} model from {model_path}')
 
-        with open(self.tags_path, 'r', encoding='utf-8') as f:
+        with open(tags_path, 'r', encoding='utf-8') as f:
             self.tags = json.load(f)
 
 
