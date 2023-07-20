@@ -1,7 +1,7 @@
-# Purpose: Pydantic models for the API."""
+"""Purpose: Pydantic models for the API."""
 from typing import List, Dict
 
-from modules.api import models as sd_models
+from modules.api import models as sd_models  # pylint: disable=E0401
 from pydantic import BaseModel, Field
 
 
