@@ -141,7 +141,7 @@ class IOData:
             output_dir = base_dir
 
             cls.output_root = Path(output_dir)
-        elif not cls.output_root or cls.output_root == Path(cls.base_dir):
+        elif not cls.output_root or (cls.base_dir and cls.output_root == Path(cls.base_dir)):
             cls.output_root = Path(base_dir)
 
         QData.read_json(cls.output_root)
