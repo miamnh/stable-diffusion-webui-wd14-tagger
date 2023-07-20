@@ -9,7 +9,6 @@ from hashlib import sha256
 from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
 from json import dumps, loads, JSONDecodeError
 from functools import partial
-from html import escape as html_escape
 from collections import defaultdict
 from PIL import Image
 
@@ -29,8 +28,6 @@ supported_extensions = {
 
 # interrogator return type
 ItRetTP = Tuple[
-    str,               # tags as string
-    str,               # discarded tags as string
     Dict[str, float],  # rating confidences
     Dict[str, float],  # tag confidences
     Dict[str, float],  # excluded tag confidences
@@ -275,14 +272,14 @@ class QData:
             cls.replace_tags = []
 
     @classmethod
-    def test_add(cls, tag: str, current: str, incompatble: list) -> None:
+    def test_add(cls, tag: str, current: str, incompatible: list) -> None:
         """ check if there are incompatible collections """
         msg = f'Empty tag in {current} tags'
         if tag == '':
             cls.err.add(msg)
             return
         cls.err.discard(msg)
-        for bad in incompatble:
+        for bad in incompatible:
             if current < bad:
                 msg = f'"{tag}" is both in {bad} and {current} tags'
             else:
@@ -349,8 +346,8 @@ class QData:
         un_re = re_comp(r' exclude(?: and \w+)? tags')
         cls.err = {err for err in cls.err if not un_re.search(err)}
         for excl in map(str.strip, exclude.split(',')):
-            incompatble = ['add', 'keep', 'search', 'replace']
-            cls.test_add(excl, 'exclude', incompatble)
+            incompatible = ['add', 'keep', 'search', 'replace']
+            cls.test_add(excl, 'exclude', incompatible)
 
     @classmethod
     def update_search(cls, search_str: str) -> None:
@@ -360,8 +357,8 @@ class QData:
         un_re = re_comp(r' search(?: and \w+)? tags')
         cls.err = {err for err in cls.err if not un_re.search(err)}
         for rex in map(str.strip, search_str.split(',')):
-            incompatble = ['add', 'keep', 'exclude', 'replace']
-            cls.test_add(rex, 'search', incompatble)
+            incompatible = ['add', 'keep', 'exclude', 'replace']
+            cls.test_add(rex, 'search', incompatible)
 
         msg = 'Unequal number of search and replace tags'
         if len(cls.search_tags) != len(cls.replace_tags):
@@ -561,23 +558,26 @@ class QData:
         return sorted(tags.items(), key=lambda x: x[1], reverse=True)
 
     @classmethod
+    def get_image_dups(cls) -> List[str]:
+        # first sort values so that those without a comma come first
+        ordered = sorted(cls.image_dups.items(), key=lambda x: ',' in x[0])
+        return [str(x) for s in ordered if len(s[1]) > 1 for x in s[1]]
+
+    @classmethod
     def finalize(cls, count: int) -> ItRetTP:
         """ finalize the query, return the results """
 
         count += len(cls.in_db)
         if count == 0:
-            return None, None, None, None, None, 'no results for query'
+            return None, None, None, 'no results for query'
 
-        tags_str, lose_str, ratings, tags, discarded_tags = '', '', {}, {}, {}
+        ratings, tags, discarded_tags = {}, {}, {}
 
         for val in cls.for_tags_file.values():
             for k in cls.add_tags:
                 val[k] = 1.0 * count
 
         for k in cls.add_tags:
-            escaped = html_escape(k)
-            tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
-                        f"""true)'>{escaped}</a>"""
             tags[k] = 1.0
 
         for k, lst in cls.tags.items():
@@ -589,13 +589,8 @@ class QData:
                 tags[k] = sum(lst) / count
                 # trigger an event to place the tag in the active tags list
                 # replace if k interferes with html code
-                escaped = html_escape(k)
-                tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
-                            f"""true)'>{escaped}</a>"""
             else:
                 discarded_tags[k] = sum(lst) / count
-                lose_str += f""", <a href='javascript:tag_clicked("{k}", """\
-                            f"""false)'>{k}</a>"""
                 for remaining_tags in cls.for_tags_file.values():
                     if k in remaining_tags:
                         if k not in cls.add_tags and k not in cls.keep_tags:
@@ -604,8 +599,6 @@ class QData:
         for k, lst in cls.discarded_tags.items():
             fraction_of_queries = len(lst) / count
             discarded_tags[k] = sum(lst) / count
-            lose_str += f""", <a href='javascript:tag_clicked("{k}", """\
-                        f"""false)'>{k}</a>"""
 
         for ent, val in cls.ratings.items():
             ratings[ent] = val / count
@@ -625,4 +618,6 @@ class QData:
             warn = "Warnings (fix and try again - it should be cheap):<ul>" + \
                    ''.join([f'<li>{x}</li>' for x in QData.err]) + "</ul>"
 
-        return tags_str[2:], lose_str[2:], ratings, tags, discarded_tags, warn
+        if count > 1 and len(cls.get_image_dups()) > 0:
+            warn += "There were duplicates, see gallery tab"
+        return ratings, tags, discarded_tags, warn

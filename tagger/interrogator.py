@@ -14,7 +14,7 @@ from huggingface_hub import hf_hub_download
 from modules import shared  # pylint: disable=import-error
 
 from tagger import settings  # pylint: disable=import-error
-from tagger.uiset import QData, IOData, ItRetTP  # pylint: disable=import-error
+from tagger.uiset import QData, IOData  # pylint: disable=import-error
 from . import dbimutils  # pylint: disable=import-error # noqa
 
 Its = settings.InterrogatorSettings
@@ -57,7 +57,6 @@ class Interrogator:
         "output_dir": '',
     }
     output = None
-    message = ''
     # odd_increment = 0
 
     @classmethod
@@ -91,12 +90,6 @@ class Interrogator:
 
         return setter
 
-    @classmethod
-    def error(cls, new_msg=None) -> ItRetTP:
-        if new_msg is not None:
-            cls.message = new_msg
-        return None, None, None, None, None, cls.message
-
     @staticmethod
     def load_image(path: str) -> Image:
         try:
@@ -109,12 +102,6 @@ class Interrogator:
         except ValueError:
             print(f'${path} is not readable or StringIO')
         return None
-
-    @staticmethod
-    def get_image_dups() -> List[str]:
-        # first sort values so that those without a comma come first
-        ordered = sorted(QData.image_dups.items(), key=lambda x: ',' in x[0])
-        return [str(x) for s in ordered if len(s[1]) > 1 for x in s[1]]
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -144,7 +131,7 @@ class Interrogator:
 
         return unloaded
 
-    def interrogate_image(self, image: Image) -> ItRetTP:
+    def interrogate_image(self, image: Image) -> None:
         sha = IOData.get_bytes_hash(image.tobytes())
         QData.clear(Interrogator.input["cumulative"])
 
@@ -169,8 +156,6 @@ class Interrogator:
             QData.apply_filters(got)
 
         Interrogator.output = QData.finalize(count)
-        Interrogator.message = Interrogator.output[-1]
-        return Interrogator.output
 
     def batch_interrogate_image(self, index: int) -> None:
         # if outputpath is '', no tags file will be written
@@ -215,7 +200,7 @@ class Interrogator:
             QData.apply_filters(data)
             QData.had_new = True
 
-    def batch_interrogate(self) -> ItRetTP:
+    def batch_interrogate(self) -> None:
         """ Interrogate all images in the input list """
         QData.tags.clear()
         QData.ratings.clear()
@@ -226,34 +211,24 @@ class Interrogator:
         if Interrogator.input["large_query"] is True and self.run_mode < 2:
             # TODO: write specified tags files instead of simple .txt
             image_list = [str(x[0].resolve()) for x in IOData.paths]
-            err = self.large_batch_interrogate(image_list, self.run_mode == 0)
-            if err:
-                return Interrogator.error(err)
+            self.large_batch_interrogate(image_list, self.run_mode == 0)
 
             # alternating dry run and run modes
             self.run_mode = (self.run_mode + 1) % 2
             count = len(image_list)
             Interrogator.output = QData.finalize(count)
-            Interrogator.message = Interrogator.output[-1]
-            return Interrogator.output
+        else:
+            verb = getattr(shared.opts, 'tagger_verbose', True)
+            count = len(QData.query)
 
-        verbose = getattr(shared.opts, 'tagger_verbose', True)
-        count = len(QData.query)
+            for i in tqdm(range(len(IOData.paths)), disable=verb, desc='Tags'):
+                self.batch_interrogate_image(i)
 
-        for i in tqdm(range(len(IOData.paths)), disable=verbose, desc='Tags'):
-            self.batch_interrogate_image(i)
+            if Interrogator.input["unload_after"]:
+                self.unload()
 
-        if Interrogator.input["unload_after"]:
-            self.unload()
-
-        count = len(QData.query) - count
-        Interrogator.output = QData.finalize_batch(count)
-        if len(Interrogator.get_image_dups()) > 0:
-            ret = list(Interrogator.output)
-            ret[-1] = "There were duplicates, see gallery tab"
-            Interrogator.output = tuple(ret)
-        Interrogator.message = Interrogator.output[-1]
-        return Interrogator.output
+            count = len(QData.query) - count
+            Interrogator.output = QData.finalize_batch(count)
 
     def interrogate(
         self,
@@ -570,7 +545,7 @@ class WaifuDiffusionInterrogator(Interrogator):
                     filename.write(tags_string)
         return images, process_images
 
-    def large_batch_interrogate(self, images, dry_run=True) -> str:
+    def large_batch_interrogate(self, images, dry_run=True) -> None:
         """ Interrogate a large batch of images. """
 
         # init model
@@ -630,7 +605,6 @@ class WaifuDiffusionInterrogator(Interrogator):
                 else:
                     device = cuda.get_current_device()
                     device.reset()
-        return ''
 
 
 class MLDanbooruInterrogator(Interrogator):

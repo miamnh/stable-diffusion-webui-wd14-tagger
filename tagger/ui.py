@@ -1,9 +1,11 @@
 """ This module contains the ui for the tagger tab. """
 from typing import Dict, Tuple, List
 import gradio as gr
+import re
 from PIL import Image
 from packaging import version
 from tensorflow import __version__ as tf_version
+from html import escape as html_esc
 
 from modules import ui  # pylint: disable=import-error
 from modules import generation_parameters_copypaste as parameters_copypaste  # pylint: disable=import-error # noqa
@@ -11,9 +13,17 @@ from modules import generation_parameters_copypaste as parameters_copypaste  # p
 from webui import wrap_gradio_gpu_call  # pylint: disable=import-error
 from tagger import utils  # pylint: disable=import-error
 from tagger.interrogator import Interrogator as It  # pylint: disable=E0401
-from tagger.uiset import IOData, QData, ItRetTP  # pylint: disable=import-error
+from tagger.uiset import IOData, QData  # pylint: disable=import-error
 
 TAG_INPUTS = ["add", "keep", "exclude", "search", "replace"]
+COMMON_OUTPUT = Tuple[
+    str,               # tags as string
+    str,               # discarded tags as string
+    Dict[str, float],  # rating confidences
+    Dict[str, float],  # tag confidences
+    Dict[str, float],  # excluded tag confidences
+    str,               # error message
+]
 
 
 def unload_interrogators() -> List[str]:
@@ -41,8 +51,8 @@ target=”_blank”>issue</a> + OS, gpu/cpu, and nr of (V)RAM
 
 
 def on_interrogate(
-    input_glob: str, output_dir: str, name: str, *args
-) -> ItRetTP:
+    input_glob: str, output_dir: str, name: str, filt: str, *args
+) -> COMMON_OUTPUT:
     # input glob should always be rechecked for new files
     IOData.update_input_glob(input_glob)
     if output_dir != It.input["output_dir"]:
@@ -50,7 +60,7 @@ def on_interrogate(
         It.input["output_dir"] = output_dir
 
     if len(IOData.err) > 0:
-        return It.error(IOData.error_msg())
+        return None, None, None, None, None, IOData.error_msg()
 
     for i, val in enumerate(args):
         part = TAG_INPUTS[i]
@@ -61,18 +71,19 @@ def on_interrogate(
     interrogator: It = next((i for i in utils.interrogators.values() if
                              i.name == name), None)
     if interrogator is None:
-        return It.error(f"'{name}': invalid interrogator")
+        return None, None, None, None, None, f"'{name}': invalid interrogator"
 
-    return interrogator.batch_interrogate()
+    interrogator.batch_interrogate()
+    return search_filter(filt)
 
 
 def on_gallery() -> List:
-    return It.get_image_dups()
+    return QData.get_image_dups()
 
 
 def on_interrogate_image(
-    image: Image, name: str, *args
-) -> ItRetTP:
+    image: Image, name: str, filt: str, *args
+) -> COMMON_OUTPUT:
     # hack brcause image interrogaion occurs twice
     # It.odd_increment = It.odd_increment + 1
     # if It.odd_increment & 1 == 1:
@@ -85,13 +96,14 @@ def on_interrogate_image(
             It.input[part] = val
 
     if image is None:
-        return It.error('No image selected')
+        return None, None, None, None, None, 'No image selected'
     interrogator: It = next((i for i in utils.interrogators.values() if
                              i.name == name), None)
     if interrogator is None:
-        return It.error(f"'{name}': invalid interrogator")
+        return None, None, None, None, None, f"'{name}': invalid interrogator"
 
-    return interrogator.interrogate_image(image)
+    interrogator.interrogate_image(image)
+    return search_filter(filt)
 
 
 def move_selection_to_input(
@@ -122,12 +134,22 @@ def move_selection_to_exclude(tag_search_filter: str) -> Tuple[str, str]:
     return ('',) + move_selection_to_input(tag_search_filter, "exclude")
 
 
-def on_tag_search_filter_change(
-    part: str
-) -> Tuple[str, str, Dict[str, float], Dict[str, float]]:
-    tags = dict(filter(lambda x: part in x[0], It.output[3].items()))
-    lost = dict(filter(lambda x: part in x[0], It.output[4].items()))
-    return ', '.join(tags.keys()), ', '.join(lost.keys()), tags, lost
+def search_filter(filt: str) -> COMMON_OUTPUT:
+    """ filters the tags and lost tags for the search field """
+    ratings, tags, lost, info = It.output
+    if ratings is None:
+        return (None, None, None, None, None, info)
+    if filt:
+        re_part = re.compile('(' + re.sub(', ?', '|', filt) + ')')
+        tags = {k: v for k, v in tags.items() if re_part.search(k)}
+        lost = {k: v for k, v in lost.items() if re_part.search(k)}
+
+    tags_str = ', '.join(f'<a href="javascript:tag_clicked(\'{html_esc(k)}\','
+                         f'true)">{k}</a>' for k, v in tags.items())
+    lost_str = ', '.join(f'<a href="javascript:tag_clicked(\'{html_esc(k)}\','
+                         f'false)">{k}</a>' for k, v in lost.items())
+
+    return (tags_str, lost_str, ratings, tags, lost, info)
 
 
 def on_ui_tabs():
@@ -312,7 +334,7 @@ def on_ui_tabs():
                     with gr.Column(variant='compact'):
                         tag_search_selection = utils.preset.component(
                             gr.Textbox,
-                            label='string search selected tags'
+                            label='Multi string search: part1, part2..'
                         )
                 with gr.Tabs():
                     with gr.TabItem(label='Ratings and included tags'):
@@ -401,12 +423,13 @@ def on_ui_tabs():
 
         tab_gallery.select(fn=on_gallery, inputs=[], outputs=[gallery])
 
+        common_output = [tags, discarded_tags, rating_confidences,
+                         tag_confidences, excluded_tag_confidences, info]
+
         # search input textbox
-        for fun in tag_search_selection.change, tag_search_selection.blur:
-            fun(fn=on_tag_search_filter_change,
-                inputs=[tag_search_selection],
-                outputs=[tags, discarded_tags, tag_confidences,
-                         excluded_tag_confidences])
+        for fun in [tag_search_selection.change, tag_search_selection.submit]:
+            fun(fn=search_filter, inputs=[tag_search_selection],
+                outputs=common_output)
 
         # buttons to move tags (right)
         mv_selection_to_keep.click(
@@ -419,10 +442,8 @@ def on_ui_tabs():
             inputs=[tag_search_selection],
             outputs=[tag_search_selection, tag_input["exclude"], info])
 
-        common_input = [interrogator] + [tag_input[tag] for tag in TAG_INPUTS]
-
-        common_output = [tags, discarded_tags, rating_confidences,
-                         tag_confidences, excluded_tag_confidences, info]
+        common_input = [interrogator, tag_search_selection] + \
+                       [tag_input[tag] for tag in TAG_INPUTS]
 
         # interrogation events
         for func in [image.change, image_submit.click]:
