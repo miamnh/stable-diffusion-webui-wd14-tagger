@@ -76,7 +76,7 @@ def on_interrogate_image(
     # hack brcause image interrogaion occurs twice
     # It.odd_increment = It.odd_increment + 1
     # if It.odd_increment & 1 == 1:
-    #    return (None, None, None, '')
+    #    return (None, None, None, None, None, '')
 
     for i, val in enumerate(args):
         part = TAG_INPUTS[i]
@@ -317,7 +317,6 @@ def on_ui_tabs():
                             label='string search selected tags'
                         )
                 with gr.Tabs():
-                    tab_gallery = gr.TabItem(label='Gallery')
                     with gr.TabItem(label='Ratings and included tags'):
                         # clickable tags to populate excluded tags
                         tags = gr.HTML(
@@ -351,6 +350,7 @@ def on_ui_tabs():
                             label='Excluded Tag confidences',
                             elem_id='discard-tag-confidences',
                         )
+                    tab_gallery = gr.TabItem(label='Gallery')
                     with tab_gallery:
                         gallery = gr.Gallery(
                             label='Gallery',

@@ -252,13 +252,9 @@ class Interrogator:
         count = len(QData.query) - count
         Interrogator.output = QData.finalize_batch(count)
         if len(Interrogator.get_image_dups()) > 0:
-            msg = "There were duplicates, see gallery tab"
-            Interrogator.output = (
-                Interrogator.output[0],
-                Interrogator.output[1],
-                Interrogator.output[2],
-                msg
-            )
+            ret = list(Interrogator.output)
+            ret[-1] = "There were duplicates, see gallery tab"
+            Interrogator.output = tuple(ret)
         Interrogator.message = Interrogator.output[-1]
         return Interrogator.output
 
