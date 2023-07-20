@@ -128,20 +128,17 @@ class IOData:
         cls.base_dir_last = Path(base_dir).parts[-1]
         cls.base_dir = base_dir
 
-        if cls.last_path_mtimes == path_mtimes:
+        # interrogating in a directory with no pics, still flush the cache
+        if len(path_mtimes) > 0 and cls.last_path_mtimes == path_mtimes:
             print('No changed images')
             return
 
-        QData.tags.clear()
-        QData.ratings.clear()
-        QData.in_db.clear()
+        QData.clear(2)
         cls.last_path_mtimes = path_mtimes
 
-        if cls.output_root is None:
-            output_dir = base_dir
-
-            cls.output_root = Path(output_dir)
-        elif not cls.output_root or (cls.base_dir and cls.output_root == Path(cls.base_dir)):
+        if not cls.output_root:
+            cls.output_root = Path(base_dir)
+        elif cls.base_dir and cls.output_root == Path(cls.base_dir):
             cls.output_root = Path(base_dir)
 
         QData.read_json(cls.output_root)
@@ -153,6 +150,7 @@ class IOData:
     def set_batch_io(cls, paths: List[str]) -> None:
         """ set input and output paths for batch mode """
         checked_dirs = set()
+        cls.paths = []
         for path in paths:
             path = Path(path)
             if not cls.save_tags:
@@ -262,18 +260,19 @@ class QData:
         cls.discarded_tags.clear()
         cls.ratings.clear()
         cls.for_tags_file.clear()
-        if mode != 1:
+        if mode > 0:
             cls.in_db.clear()
-        if mode == 2:
+            cls.image_dups.clear()
+        if mode > 1:
             cls.json_db = None
             cls.weighed = (defaultdict(list), defaultdict(list))
             cls.query = {}
+        if mode > 2:
             cls.add_tags = []
             cls.keep_tags = set()
             cls.exclude_tags = []
             cls.search_tags = {}
             cls.replace_tags = []
-            cls.image_dups.clear()
 
     @classmethod
     def test_add(cls, tag: str, current: str, incompatble: list) -> None:
