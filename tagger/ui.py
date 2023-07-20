@@ -107,31 +107,36 @@ def on_interrogate_image(
 
 
 def move_selection_to_input(
-    tag_search_filter: str, field: str
-) -> Tuple[str, str]:
+    filt: str, field: str
+) -> Tuple[str, str, str]:
     """ moves the selected to the input field """
     if It.output is None:
-        return (None, '')
+        return (None, None, '')
+    tags = It.output[1]
+    got = It.input[field]
+    existing = set(got.split(', '))
+    if filt:
+        re_part = re.compile('(' + re.sub(', ?', '|', filt) + ')')
+        tags = {k: v for k, v in tags.items() if re_part.search(k) and
+                k not in existing}
+        print("Tags remaining: ", tags)
 
-    filt = {(k, v) for k, v in It.output[2].items() if tag_search_filter in k}
-    if len(filt) == 0:
-        return (None, '')
+    if len(tags) == 0:
+        return ('', None, '')
 
-    add = set(dict(filt).keys())
-    if It.input[field] != '':
-        add |= {x.strip() for x in It.input[field].split(',')}
+    if got != '':
+        got = got + ', '
 
-    It.input[field] = ', '.join(add)
-
-    return (It.input[field], '')
+    (data, info) = It.set(field)(got + ', '.join(tags.keys()))
+    return ('', data, info)
 
 
-def move_selection_to_keep(tag_search_filter: str) -> Tuple[str, str]:
-    return ('',) + move_selection_to_input(tag_search_filter, "keep")
+def move_selection_to_keep(tag_search_filter: str) -> Tuple[str, str, str]:
+    return move_selection_to_input(tag_search_filter, "keep")
 
 
-def move_selection_to_exclude(tag_search_filter: str) -> Tuple[str, str]:
-    return ('',) + move_selection_to_input(tag_search_filter, "exclude")
+def move_selection_to_exclude(tag_search_filter: str) -> Tuple[str, str, str]:
+    return move_selection_to_input(tag_search_filter, "exclude")
 
 
 def search_filter(filt: str) -> COMMON_OUTPUT:
@@ -334,7 +339,8 @@ def on_ui_tabs():
                     with gr.Column(variant='compact'):
                         tag_search_selection = utils.preset.component(
                             gr.Textbox,
-                            label='Multi string search: part1, part2..'
+                            label='Multi string search: part1, part2.. '
+                                  '(Enter key to update)',
                         )
                 with gr.Tabs():
                     with gr.TabItem(label='Ratings and included tags'):
@@ -428,17 +434,17 @@ def on_ui_tabs():
 
         # search input textbox
         for fun in [tag_search_selection.change, tag_search_selection.submit]:
-            fun(fn=search_filter, inputs=[tag_search_selection],
-                outputs=common_output)
+            fun(fn=wrap_gradio_gpu_call(search_filter),
+                inputs=[tag_search_selection], outputs=common_output)
 
         # buttons to move tags (right)
         mv_selection_to_keep.click(
-            fn=move_selection_to_keep,
+            fn=wrap_gradio_gpu_call(move_selection_to_keep),
             inputs=[tag_search_selection],
             outputs=[tag_search_selection, tag_input["keep"], info])
 
         mv_selection_to_exclude.click(
-            fn=move_selection_to_exclude,
+            fn=wrap_gradio_gpu_call(move_selection_to_exclude),
             inputs=[tag_search_selection],
             outputs=[tag_search_selection, tag_input["exclude"], info])
 
