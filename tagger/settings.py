@@ -9,7 +9,7 @@ DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, 3_3,
 DEFAULT_OFF = '[name].[output_extension]'
 
 
-def slider_wrapper(_value, _elem_id, **kwargs):
+def slider_wrapper(value, elem_id, **kwargs):
     # required or else gradio will throw errors
     return gr.Slider(**kwargs)
 
