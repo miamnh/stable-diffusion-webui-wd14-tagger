@@ -303,7 +303,8 @@ def on_ui_tabs():
                     with gr.Column(variant='compact'):
                         tag_frac_threshold = utils.preset.component(
                             gr.Slider,
-                            label='Mininmum fraction for tags',
+                            label='Min tag fraction in batch and '
+                                  'interrogations',
                             minimum=0,
                             maximum=1,
                             value=QData.tag_frac_threshold,
