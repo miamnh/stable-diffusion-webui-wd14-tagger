@@ -82,7 +82,7 @@ class Interrogator:
             if key == 'input_glob':
                 IOData.update_input_glob(val)
                 return (val, cls.get_errors())
-            if key == val != cls.input[key]:
+            if val != cls.input[key]:
                 tgt_cls = IOData if key == 'output_dir' else QData
                 getattr(tgt_cls, "update_" + key)(val)
                 cls.input[key] = val
