@@ -449,6 +449,8 @@ class WaifuDiffusionInterrogator(Interrogator):
         }
         mpath = Path(mdir, 'model.json')
 
+        data = [download_model]
+
         if not os.path.exists(mdir):
             os.mkdir(mdir)
 
