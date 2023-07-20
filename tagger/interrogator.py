@@ -126,6 +126,9 @@ class Interrogator:
     def load(self):
         raise NotImplementedError()
 
+    def large_batch_interrogate(self, images: List, dry_run=False) -> str:
+        raise NotImplementedError()
+
     def unload(self) -> bool:
         unloaded = False
 
