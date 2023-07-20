@@ -212,6 +212,9 @@ class Interrogator:
             QData.apply_filters(data)
             QData.had_new = True
 
+    def large_batch_interrogate(self, images: List, dry_run=False) -> str:
+        raise NotImplementedError()
+
     def batch_interrogate(self) -> ItRetTP:
         """ Interrogate all images in the input list """
         QData.tags.clear()
@@ -368,6 +371,9 @@ class DeepDanbooruInterrogator(Interrogator):
                 ratings[tag[7:]] = confidences[i]
 
         return ratings, tags
+
+    def large_batch_interrogate(self, images: List, dry_run=False) -> str:
+        raise NotImplementedError()
 
 
 # FIXME this is silly, in what scenario would the env change from MacOS to
@@ -692,3 +698,6 @@ class MLDanbooruInterrogator(Interrogator):
 
         tags = {tag: float(conf) for tag, conf in zip(self.tags, y.flatten())}
         return {}, tags
+
+    def large_batch_interrogate(self, images: List, dry_run=False) -> str:
+        raise NotImplementedError()

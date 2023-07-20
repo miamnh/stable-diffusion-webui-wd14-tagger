@@ -21,7 +21,7 @@ class TaggerInterrogateRequest(sd_models.InterrogateRequest):
     )
 
 
-class TaggerInterrogateResponse(BaseModel):  
+class TaggerInterrogateResponse(BaseModel):
     """Interrogate response model"""
     caption: Dict[str, float] = Field(
         title='Caption',

@@ -50,7 +50,9 @@ class Api:
             response_model=str,
         )
 
-    def auth(self, creds: HTTPBasicCredentials = Depends(HTTPBasic())):
+    def auth(self, creds: HTTPBasicCredentials = None):
+        if creds is None:
+            creds = Depends(HTTPBasic())
         if creds.username in self.credentials:
             if compare_digest(creds.password,
                               self.credentials[creds.username]):
