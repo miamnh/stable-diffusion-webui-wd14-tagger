@@ -122,6 +122,12 @@ class IOData:
             elif ext != '.txt' and 'db.json' not in filename:
                 print(f'{filename}: not an image extension: "{ext}"')
 
+        if cls.output_root is None:
+            cls.output_root = Path(base_dir)
+        elif cls.base_dir and cls.output_root == Path(cls.base_dir):
+            cls.output_root = Path(base_dir)
+
+        # XXX what is this basedir magic trying to achieve?
         cls.base_dir_last = Path(base_dir).parts[-1]
         cls.base_dir = base_dir
 
