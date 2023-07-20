@@ -1,18 +1,15 @@
 """Module for the UI of extensions"""  # 扩展的UI模块
 # 由 WSH032 慷慨提供: graciously provided by WSH032
+
+import sys
 import os
-from typing import Tuple, Union, Callable
+from typing import Tuple, Callable
 
 import gradio as gr
 from fastapi import FastAPI
 
-from addons.extension_tools import (
-    extensions_dir,
-    javascript_html,
-    css_html,
-    dir_path2html,
-)
-from modules import shared
+
+DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 # 把与各扩展有关的 import 都放在各自的函数里面
@@ -22,9 +19,11 @@ from modules import shared
 # Because there may be an extension that is missing and cleared, there is no
 # need to import the module of the extension otherwise, the entire program will
 # fail to start due to the failure of an extension
-def ui_sd_webui_infinite_image_browsing(
-    extension_name: str
-) -> Tuple[Callable, Union[None, Callable], str, str]:
+def ui_sd_webui_infinite_image_browsing() -> Tuple[Callable, Callable]:
+
+    # for sd_webui_infinite_image_browsing working
+    sys_path_copy = sys.path.copy()
+    sys.path = [os.path.join(DIR, "sd_webui_infinite_image_browsing")] + sys_path_copy
 
     print("Build gallery")  # 构建图库
 
@@ -63,7 +62,7 @@ def ui_sd_webui_infinite_image_browsing(
 
     def not_implemented_error():
         # 独立于SD-WebUI运行时不支持
-        logger.info("Not_Implemented_Error, unsupported by SD-WebUI runtime")
+        logger.info("Not_Implemented_Error, unsupported on standalone mode")
 
     def create_demo():
         # ！！！注意，所有的elem_id都不要改，js依靠这些id来操作！！！
@@ -83,8 +82,8 @@ def ui_sd_webui_infinite_image_browsing(
 
             for tab in ["txt2img", "img2img", "inpaint", "extras"]:
                 btn = gr.Button(f"Send to {tab}", elem_id=f"iib_hidden_tab_{tab}")
-                # 独立运行时后不起作用，logger.info一个未实现错误:
-                # It does not work after running independently, logger.info an
+                # 独立运行时不起作用，logger.info一个未实现错误:
+                # It does not work on standalone mode, logger.info an error
                 btn.click(fn=not_implemented_error)
 
             img.change(on_img_change)
@@ -92,30 +91,16 @@ def ui_sd_webui_infinite_image_browsing(
                                      outputs=[img, img_file_info])
         return demo
 
-    # js应该所在的文件夹: The folder where js should be
-    js_dir = os.path.join(extensions_dir, extension_name, "javascript")
-    # 该文件夹内所有js文件的绝对路径: The absolute path of all js files in the folder
-    js_str = dir_path2html(
-        dir=js_dir,
-        ext=".js",
-        html_func=javascript_html
-    )
-
-    css_path = os.path.join(extensions_dir, extension_name, "style.css")
-    css_str = css_html(css_path)
-
     def on_ui_tabs():
         return create_demo(), title, elem_id
 
     # 一定要注意原作者是否修改这个接口！！！:
     # Be sure to adapt to interface changes by the original author!!!
-    def on_app_start(_: gr.Blocks, app: FastAPI):
-        app_utils = AppUtils(
-            base="tab_iib",
-            sd_webui_config=shared.cmd_opts.sd_webui_config,
-            update_image_index=shared.cmd_opts.update_image_index,
-            extra_paths=shared.cmd_opts.extra_paths,
-        )
-        app_utils.wrap_app(app)
+    def on_app_startd(_: gr.Blocks, app: FastAPI):
+        return AppUtils().wrap_app(app)
+    
+    sys.path = sys_path_copy  # don't forget to recover sys.path
 
-    return on_ui_tabs, on_app_start, js_str, css_str
+    return on_ui_tabs, on_app_startd
+
+on_ui_tabs, on_app_startd = ui_sd_webui_infinite_image_browsing()

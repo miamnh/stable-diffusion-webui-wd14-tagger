@@ -1,3 +1,3 @@
-[submodule "extensions/sd_webui_infinite_image_browsing"]
+[submodule "addons/sd_webui_infinite_image_browsing"]
 	path = addons/sd_webui_infinite_image_browsing
-	url = git@github.com:picobyte/sd-webui-infinite-image-browsing.git
+	url = https://github.com/picobyte/sd-webui-infinite-image-browsing.git
