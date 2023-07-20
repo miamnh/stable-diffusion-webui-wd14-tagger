@@ -125,8 +125,6 @@ def move_selection_to_exclude(tag_search_filter: str) -> Tuple[str, str]:
 def on_tag_search_filter_change(
     part: str
 ) -> Tuple[str, str, Dict[str, float], Dict[str, float]]:
-    if It.output is None or len(part) < 2:
-        return None, None, None, None
     tags = dict(filter(lambda x: part in x[0], It.output[3].items()))
     lost = dict(filter(lambda x: part in x[0], It.output[4].items()))
     return ', '.join(tags.keys()), ', '.join(lost.keys()), tags, lost
