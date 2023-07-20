@@ -1,9 +1,10 @@
+"""Tagger module entry point."""
 from PIL import Image, ImageFile
 
-from modules import script_callbacks
-from tagger.api import on_app_started
-from tagger.ui import on_ui_tabs
-from tagger.settings import on_ui_settings
+from modules import script_callbacks  # pylint: disable=import-error
+from tagger.api import on_app_started  # pylint: disable=import-error
+from tagger.ui import on_ui_tabs  # pylint: disable=import-error
+from tagger.settings import on_ui_settings  # pylint: disable=import-error
 from addons import extensions_ui
 
 

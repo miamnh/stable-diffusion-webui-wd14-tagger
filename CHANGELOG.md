@@ -1,4 +1,14 @@
+# v1.1.1
 
+Internal cleanup, no separate interrogation for inverse
+Fix issues with search and sending selection to keep/exclude
+Fix issue #14, picking up last edit box changes
+Fix 2 issues reported by guansss
+fix huggingface reload issues. Thanks to Atoli and coder168 for reporting
+experimental tensorflow unloading, but after some discussion, maybe conversion to onxx can solve this. See #17, thanks again Sean Wang.
+add gallery tab, rudimentary.
+fix some hf download issues
+fixes for fastapi
 added ML-Danbooru support, thanks to [CCRcmcpe](github.com/CCRcmcpe)
 
 # v1.1.0

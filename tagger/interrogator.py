@@ -11,11 +11,11 @@ from numpy import asarray, float32, expand_dims, exp
 from tqdm import tqdm
 
 from huggingface_hub import hf_hub_download
-from modules import shared
+from modules import shared  # pylint: disable=import-error
 
-from . import dbimutils
-from tagger import settings
-from tagger.uiset import QData, IOData, ItRetTP
+from tagger import settings  # pylint: disable=import-error
+from tagger.uiset import QData, IOData  # pylint: disable=import-error
+from . import dbimutils  # pylint: disable=import-error # noqa
 
 Its = settings.InterrogatorSettings
 
@@ -54,12 +54,9 @@ class Interrogator:
         "exclude": '',
         "search": '',
         "replace": '',
-        "paths": '',
-        "input_glob": '',
         "output_dir": '',
     }
     output = None
-    err = set()
     # odd_increment = 0
 
     @classmethod
@@ -73,8 +70,7 @@ class Interrogator:
         errors = ''
         if len(IOData.err) > 0:
             # write errors in html pointer list, every error in a <li> tag
-            errors = 'Input/Output errors:<br><ul><li>' + \
-                     '</li><li>'.join(IOData.err) + '</li></ul>'
+            errors = IOData.error_msg()
         if len(QData.err) > 0:
             errors += 'Fix to write correct output:<br><ul><li>' + \
                       '</li><li>'.join(QData.err) + '</li></ul>'
@@ -83,11 +79,12 @@ class Interrogator:
     @classmethod
     def set(cls, key: str) -> Callable[[str], Tuple[str, str]]:
         def setter(val) -> Tuple[str, str]:
+            if key == 'input_glob':
+                IOData.update_input_glob(val)
+                return (val, cls.get_errors())
             if val != cls.input[key]:
-                if key in {'input_glob', 'output_dir'}:
-                    getattr(IOData, "update_" + key)(val)
-                else:
-                    getattr(QData, "update_" + key)(val)
+                tgt_cls = IOData if key == 'output_dir' else QData
+                getattr(tgt_cls, "update_" + key)(val)
                 cls.input[key] = val
             return (cls.input[key], cls.get_errors())
 
@@ -106,24 +103,17 @@ class Interrogator:
             print(f'${path} is not readable or StringIO')
         return None
 
-    @staticmethod
-    def get_image_dups() -> List[str]:
-        # first sort values so that those without a comma come first
-        ordered = sorted(QData.image_dups.items(), key=lambda x: ',' in x[0])
-        return [str(x) for s in ordered if len(s[1]) > 1 for x in s[1]]
-
     def __init__(self, name: str) -> None:
         self.name = name
         self.model = None
+        self.tags = None
         # run_mode 0 is dry run, 1 means run (alternating), 2 means disabled
         self.run_mode = 0 if hasattr(self, "large_batch_interrogate") else 2
 
     def load(self):
         raise NotImplementedError()
 
-    def large_batch_interrogate(
-        self, images: List, dry_run=False
-    ) -> List[ItRetTP]:
+    def large_batch_interrogate(self, images: List, dry_run=False) -> str:
         raise NotImplementedError()
 
     def unload(self) -> bool:
@@ -141,7 +131,7 @@ class Interrogator:
 
         return unloaded
 
-    def interrogate_image(self, image: Image) -> ItRetTP:
+    def interrogate_image(self, image: Image) -> None:
         sha = IOData.get_bytes_hash(image.tobytes())
         QData.clear(Interrogator.input["cumulative"])
 
@@ -165,11 +155,7 @@ class Interrogator:
         for got in QData.in_db.values():
             QData.apply_filters(got)
 
-        if QData.inverse:
-            Interrogator.output = QData.finalize_inverse(count)
-        else:
-            Interrogator.output = QData.finalize(count)
-        return Interrogator.output
+        Interrogator.output = QData.finalize(count)
 
     def batch_interrogate_image(self, index: int) -> None:
         # if outputpath is '', no tags file will be written
@@ -207,13 +193,14 @@ class Interrogator:
         else:
             data = (abspath, out_path, fi_key) + self.interrogate(image)
             # also the tags can indicate that the image is a duplicate
-            no_floats = filter(lambda x: not isinstance(x[0], float), data[3].items())
-            sorted_tags = ','.join(f'({k},{v:.1f})' for (k,v) in sorted(no_floats, key=lambda x: x[0]))
+            no_floats = sorted(filter(lambda x: not isinstance(x[0], float),
+                                      data[3].items()), key=lambda x: x[0])
+            sorted_tags = ','.join(f'({k},{v:.1f})' for (k, v) in no_floats)
             QData.image_dups[sorted_tags].add(abspath)
             QData.apply_filters(data)
             QData.had_new = True
 
-    def batch_interrogate(self) -> ItRetTP:
+    def batch_interrogate(self) -> None:
         """ Interrogate all images in the input list """
         QData.tags.clear()
         QData.ratings.clear()
@@ -224,40 +211,24 @@ class Interrogator:
         if Interrogator.input["large_query"] is True and self.run_mode < 2:
             # TODO: write specified tags files instead of simple .txt
             image_list = [str(x[0].resolve()) for x in IOData.paths]
-            err = self.large_batch_interrogate(image_list, self.run_mode == 0)
-            if err:
-                return (None, None, None, err)
+            self.large_batch_interrogate(image_list, self.run_mode == 0)
 
             # alternating dry run and run modes
             self.run_mode = (self.run_mode + 1) % 2
             count = len(image_list)
-            if QData.inverse:
-                Interrogator.output = QData.finalize_inverse(count)
-            else:
-                Interrogator.output = QData.finalize(count)
-            return Interrogator.output
+            Interrogator.output = QData.finalize(count)
+        else:
+            verb = getattr(shared.opts, 'tagger_verbose', True)
+            count = len(QData.query)
 
-        verbose = getattr(shared.opts, 'tagger_verbose', True)
-        count = len(QData.query)
+            for i in tqdm(range(len(IOData.paths)), disable=verb, desc='Tags'):
+                self.batch_interrogate_image(i)
 
-        for i in tqdm(range(len(IOData.paths)), disable=verbose, desc='Tags'):
-            self.batch_interrogate_image(i)
+            if Interrogator.input["unload_after"]:
+                self.unload()
 
-        if Interrogator.input["unload_after"]:
-            self.unload()
-
-        count = len(QData.query) - count
-        Interrogator.output = QData.finalize_batch(count)
-        if len(Interrogator.get_image_dups()) > 0:
-            msg = "There were duplicates, see gallery tab"
-            Interrogator.err.add(msg)
-            Interrogator.output = (
-                Interrogator.output[0],
-                Interrogator.output[1],
-                Interrogator.output[2],
-                msg
-            )
-        return Interrogator.output
+            count = len(QData.query) - count
+            Interrogator.output = QData.finalize_batch(count)
 
     def interrogate(
         self,
@@ -372,6 +343,9 @@ class DeepDanbooruInterrogator(Interrogator):
 
         return ratings, tags
 
+    def large_batch_interrogate(self, images: List, dry_run=False) -> str:
+        raise NotImplementedError()
+
 
 # FIXME this is silly, in what scenario would the env change from MacOS to
 # another OS? TODO: remove if the author does not respond.
@@ -424,7 +398,8 @@ class WaifuDiffusionInterrogator(Interrogator):
     def download(self) -> None:
         mdir = Path(shared.models_path, 'interrogators')
         if self.is_hf:
-            print(f"Loading {self.name} model file from {self.repo_id}, {self.model_path}")
+            print(f"Loading {self.name} model file from {self.repo_id}, "
+                  f"{self.model_path}")
 
             model_path = hf_hub_download(
                 self.repo_id,
@@ -445,19 +420,23 @@ class WaifuDiffusionInterrogator(Interrogator):
         }
         mpath = Path(mdir, 'model.json')
 
+        data = [download_model]
+
         if not os.path.exists(mdir):
             os.mkdir(mdir)
 
         elif os.path.exists(mpath):
-            with io.open(file=mpath, mode='r') as filename:
+            with io.open(file=mpath, mode='r', encoding='utf-8') as filename:
                 try:
                     data = json.load(filename)
-                    data.append(download_model)
+                    # No need to append if it's already contained
+                    if download_model not in data:
+                        data.append(download_model)
                 except json.JSONDecodeError as err:
                     print(f'Adding download_model {mpath} raised {repr(err)}')
                     data = [download_model]
 
-        with io.open(mpath, 'w') as filename:
+        with io.open(mpath, 'w', encoding='utf-8') as filename:
             json.dump(data, filename)
         return model_path, tags_path
 
@@ -526,22 +505,22 @@ class WaifuDiffusionInterrogator(Interrogator):
             for image_path in filepaths:
                 image_path = image_path.numpy().decode("utf-8")
                 lines.append(f"{image_path}\n")
-            with io.open("dry_run_read.txt", "a") as filename:
-                filename.writelines(lines)
+            with io.open("dry_run_read.txt", "a", encoding="utf-8") as filen:
+                filen.writelines(lines)
 
         scheduled = [f"{image_path}\n" for image_path in images]
 
         # Truncate the file from previous runs
         print("updating dry_run_read.txt")
-        io.open("dry_run_read.txt", "w").close()
-        with io.open("dry_run_scheduled.txt", "w") as filename:
-            filename.writelines(scheduled)
+        io.open("dry_run_read.txt", "w", encoding="utf-8").close()
+        with io.open("dry_run_scheduled.txt", "w", encoding="utf-8") as filen:
+            filen.writelines(scheduled)
         return process_images
 
     def run(self, images, pred_model) -> Tuple[str, Callable[[str], None]]:
         threshold = QData.threshold
         self.tags["sanitized_name"] = self.tags["name"].map(
-            lambda x: x if x in Its.kaomojis else x.replace("_", " ")
+            lambda i: i if i in Its.kaomojis else i.replace("_", " ")
         )
 
         def process_images(filepaths, images):
@@ -562,11 +541,11 @@ class WaifuDiffusionInterrogator(Interrogator):
 
                 tags_string = ", ".join(tags_names)
                 txtfile = Path(ipath).with_suffix(".txt")
-                with io.open(txtfile, "w") as filename:
+                with io.open(txtfile, "w", encoding="utf-8") as filename:
                     filename.write(tags_string)
         return images, process_images
 
-    def large_batch_interrogate(self, images, dry_run=True) -> str:
+    def large_batch_interrogate(self, images, dry_run=True) -> None:
         """ Interrogate a large batch of images. """
 
         # init model
@@ -580,7 +559,7 @@ class WaifuDiffusionInterrogator(Interrogator):
 
         import tensorflow as tf
 
-        from tagger.Generator.TFDataReader import DataGenerator
+        from tagger.generator.tf_data_reader import DataGenerator
 
         # tensorflow maps nearly all vram by default, so we limit this
         # https://www.tensorflow.org/guide/gpu#limiting_gpu_memory_growth
@@ -608,7 +587,7 @@ class WaifuDiffusionInterrogator(Interrogator):
         generator = DataGenerator(
             file_list=images, target_height=height, target_width=width,
             batch_size=getattr(shared.opts, 'tagger_batch_size', 1024)
-        ).genDS()
+        ).gen_ds()
 
         orig_add_tags = QData.add_tags
         for filepaths, image_list in tqdm(generator):
@@ -626,10 +605,10 @@ class WaifuDiffusionInterrogator(Interrogator):
                 else:
                     device = cuda.get_current_device()
                     device.reset()
-        return ''
 
 
 class MLDanbooruInterrogator(Interrogator):
+    """ Interrogator for the MLDanbooru model. """
     def __init__(
         self,
         name: str,
@@ -654,16 +633,15 @@ class MLDanbooruInterrogator(Interrogator):
         return model_path, tags_path
 
     def load(self) -> None:
-        self.model_path, self.tags_path = self.download()
+        model_path, tags_path = self.download()
 
         ort = get_onnxrt()
-        self.model = ort.InferenceSession(self.model_path, providers=onnxrt_providers)
+        self.model = ort.InferenceSession(model_path,
+                                          providers=onnxrt_providers)
+        print(f'Loaded {self.name} model from {model_path}')
 
-        print(f'Loaded {self.name} model from {self.model_path}')
-
-        with open(self.tags_path, 'r', encoding='utf-8') as f:
-            self.tags = json.load(f)
-
+        with open(tags_path, 'r', encoding='utf-8') as filen:
+            self.tags = json.load(filen)
 
     def interrogate(
         self,
@@ -694,3 +672,6 @@ class MLDanbooruInterrogator(Interrogator):
 
         tags = {tag: float(conf) for tag, conf in zip(self.tags, y.flatten())}
         return {}, tags
+
+    def large_batch_interrogate(self, images: List, dry_run=False) -> str:
+        raise NotImplementedError()

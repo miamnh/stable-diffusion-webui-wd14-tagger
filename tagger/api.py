@@ -3,15 +3,15 @@ from typing import Callable
 from threading import Lock
 from secrets import compare_digest
 
-from modules import shared
-from modules.api.api import decode_base64_to_image
-from modules.call_queue import queue_lock
+from modules import shared  # pylint: disable=import-error
+from modules.api.api import decode_base64_to_image  # pylint: disable=E0401
+from modules.call_queue import queue_lock  # pylint: disable=import-error
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from tagger import utils
-from tagger import api_models as models
-from tagger.uiset import QData
+from tagger import utils  # pylint: disable=import-error
+from tagger import api_models as models  # pylint: disable=import-error
+from tagger.uiset import QData  # pylint: disable=import-error
 
 
 class Api:
@@ -50,7 +50,9 @@ class Api:
             response_model=str,
         )
 
-    def auth(self, creds: HTTPBasicCredentials = Depends(HTTPBasic())):
+    def auth(self, creds: HTTPBasicCredentials = None):
+        if creds is None:
+            creds = Depends(HTTPBasic())
         if creds.username in self.credentials:
             if compare_digest(creds.password,
                               self.credentials[creds.username]):

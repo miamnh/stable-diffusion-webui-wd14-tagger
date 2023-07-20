@@ -2,7 +2,7 @@
 from pathlib import Path
 from argparse import ArgumentParser
 
-from modules.shared import models_path
+from modules.shared import models_path  # pylint: disable=import-error
 
 default_ddp_path = Path(models_path, 'deepdanbooru')
 default_onnx_path = Path(models_path, 'TaggerOnnx')

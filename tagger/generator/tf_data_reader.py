@@ -1,7 +1,7 @@
-# Credits to SmilingWolf
+""" Credits to SmilingWolf """
 
 import tensorflow as tf
-import tensorflow_io as tfio
+import tensorflow_io as tfio  # pylint: disable=import-error
 
 
 def is_webp(contents):
@@ -46,7 +46,7 @@ class DataGenerator:
             mask = tf.expand_dims(mask, axis=-1)
             image = tf.expand_dims(image, axis=-1)
             image = tf.repeat(image, 3, axis=-1)
-            image = tf.concat([image, mask], axis=-1)
+            image = tf.concat([image, mask], -1)
 
         # Alpha to white
         if tf.shape(image)[2] == 4:
@@ -56,8 +56,8 @@ class DataGenerator:
 
             matte = tf.ones_like(image, dtype=tf.uint8) * [255, 255, 255, 255]
 
-            weighted_matte = tf.cast(matte, dtype=alpha_mask.dtype) *(1 - alpha_mask)
-            weighted_image = tf.cast(image, dtype=alpha_mask.dtype) * alpha_mask
+            weighted_matte = tf.cast(matte, dtype=alpha_mask.dtype) * (1 - alpha_mask)  # noqa: E501
+            weighted_image = tf.cast(image, dtype=alpha_mask.dtype) * alpha_mask  # noqa: E501
             image = weighted_image + weighted_matte
 
             # Remove alpha channel
@@ -102,7 +102,7 @@ class DataGenerator:
         image = tf.pad(image, padding, mode="CONSTANT", constant_values=255)
         return filename, image
 
-    def genDS(self):
+    def gen_ds(self):
         """ Generates the dataset """
         images_list = tf.data.Dataset.from_tensor_slices(self.file_list)
 

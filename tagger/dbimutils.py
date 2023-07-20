@@ -1,4 +1,4 @@
-# DanBooru IMage Utility functions
+"""DanBooru IMage Utility functions"""
 
 import cv2
 import numpy as np

@@ -9,15 +9,14 @@ from hashlib import sha256
 from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
 from json import dumps, loads, JSONDecodeError
 from functools import partial
-from html import escape as html_escape
 from collections import defaultdict
 from PIL import Image
-from modules import shared
-from modules.deepbooru import re_special as tag_escape_pattern
 
-from tagger import format as tags_format
+from modules import shared  # pylint: disable=import-error
+from modules.deepbooru import re_special  # pylint: disable=import-error
+from tagger import format as tags_format  # pylint: disable=import-error
+from tagger import settings  # pylint: disable=import-error
 
-from tagger import settings
 Its = settings.InterrogatorSettings
 
 # PIL.Image.registered_extensions() returns only PNG if you call early
@@ -29,21 +28,26 @@ supported_extensions = {
 
 # interrogator return type
 ItRetTP = Tuple[
-    str,               # tags as string
     Dict[str, float],  # rating confidences
     Dict[str, float],  # tag confidences
+    Dict[str, float],  # excluded tag confidences
     str,               # error message
 ]
 
 
 class IOData:
     """ data class for input and output paths """
-    last_input_glob = None
+    last_path_mtimes = None
     base_dir = None
     output_root = None
     paths = []
     save_tags = True
     err = set()
+
+    @classmethod
+    def error_msg(cls) -> str:
+        return "Errors:<ul>" + ''.join(f'<li>{x}</li>' for x in cls.err) + \
+               "</ul>"
 
     @classmethod
     def flip_save_tags(cls) -> callable:
@@ -90,18 +94,15 @@ class IOData:
     def update_input_glob(cls, input_glob: str) -> None:
         """ update input glob pattern, and set input and output paths """
         input_glob = input_glob.strip()
-        if input_glob == cls.last_input_glob:
-            print('input glob did not change')
-            return
-        last_input_glob = input_glob
 
-        cls.paths = []
+        paths = []
 
         # if there is no glob pattern, insert it automatically
         if not input_glob.endswith('*'):
             if not input_glob.endswith(os.sep):
                 input_glob += os.sep
             input_glob += '*'
+
         # get root directory of input glob pattern
         base_dir = input_glob.replace('?', '*')
         base_dir = base_dir.split(os.sep + '*').pop(0)
@@ -111,78 +112,84 @@ class IOData:
             return
         cls.err.discard(msg)
 
-        if cls.output_root is None:
-            output_dir = base_dir
+        recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
+        path_mtimes = []
+        for filename in glob(input_glob, recursive=recursive):
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in supported_extensions:
+                path_mtimes.append(os.path.getmtime(filename))
+                paths.append(filename)
+            elif ext != '.txt' and 'db.json' not in filename:
+                print(f'{filename}: not an image extension: "{ext}"')
 
-            cls.output_root = Path(output_dir)
-        elif not cls.output_root or cls.output_root == Path(cls.base_dir):
+        # interrogating in a directory with no pics, still flush the cache
+        if len(path_mtimes) > 0 and cls.last_path_mtimes == path_mtimes:
+            print('No changed images')
+            return
+
+        QData.clear(2)
+        cls.last_path_mtimes = path_mtimes
+
+        if not cls.output_root:
+            cls.output_root = Path(base_dir)
+        elif cls.base_dir and cls.output_root == Path(cls.base_dir):
             cls.output_root = Path(base_dir)
 
+        # XXX what is this basedir magic trying to achieve?
         cls.base_dir_last = Path(base_dir).parts[-1]
         cls.base_dir = base_dir
+
         QData.read_json(cls.output_root)
 
-        recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
-        paths = glob(input_glob, recursive=recursive)
         print(f'found {len(paths)} image(s)')
         cls.set_batch_io(paths)
-        if len(cls.err) == 0:
-            cls.last_input_glob = last_input_glob
-            QData.tags.clear()
-            QData.ratings.clear()
-            QData.in_db.clear()
-
-        return
 
     @classmethod
-    def set_batch_io(cls, paths: List[Path]) -> None:
+    def set_batch_io(cls, paths: List[str]) -> None:
         """ set input and output paths for batch mode """
         checked_dirs = set()
+        cls.paths = []
         for path in paths:
-            ext = os.path.splitext(path)[1].lower()
-            if ext in supported_extensions:
-                path = Path(path)
-                if not cls.save_tags:
-                    cls.paths.append([path, '', ''])
-                    continue
+            path = Path(path)
+            if not cls.save_tags:
+                cls.paths.append([path, '', ''])
+                continue
 
-                # guess the output path
-                base_dir_last_idx = path.parts.index(cls.base_dir_last)
-                # format output filename
+            # guess the output path
+            base_dir_last_idx = path.parts.index(cls.base_dir_last)
+            # format output filename
 
-                info = tags_format.Info(path, 'txt')
-                fmt = partial(lambda info, m: tags_format.parse(m, info), info)
+            info = tags_format.Info(path, 'txt')
+            fmt = partial(lambda info, m: tags_format.parse(m, info), info)
 
-                msg = 'Invalid output format'
-                cls.err.discard(msg)
-                try:
-                    formatted_output_filename = tags_format.pattern.sub(
-                        fmt,
-                        Its.output_filename_format
-                    )
-                except (TypeError, ValueError):
-                    cls.err.add(msg)
+            msg = 'Invalid output format'
+            cls.err.discard(msg)
+            try:
+                formatted_output_filename = tags_format.pattern.sub(
+                    fmt,
+                    Its.output_filename_format
+                )
+            except (TypeError, ValueError):
+                cls.err.add(msg)
 
-                output_dir = cls.output_root.joinpath(
-                    *path.parts[base_dir_last_idx + 1:]).parent
+            output_dir = cls.output_root.joinpath(
+                *path.parts[base_dir_last_idx + 1:]).parent
 
-                tags_out = output_dir.joinpath(formatted_output_filename)
+            tags_out = output_dir.joinpath(formatted_output_filename)
 
-                if output_dir in checked_dirs:
-                    cls.paths.append([path, tags_out, ''])
-                else:
-                    checked_dirs.add(output_dir)
-                    if os.path.exists(output_dir):
-                        msg = 'output_dir: not a directory.'
-                        if os.path.isdir(output_dir):
-                            cls.paths.append([path, tags_out, ''])
-                            cls.err.discard(msg)
-                        else:
-                            cls.err.add(msg)
+            if output_dir in checked_dirs:
+                cls.paths.append([path, tags_out, ''])
+            else:
+                checked_dirs.add(output_dir)
+                if os.path.exists(output_dir):
+                    msg = 'output_dir: not a directory.'
+                    if os.path.isdir(output_dir):
+                        cls.paths.append([path, tags_out, ''])
+                        cls.err.discard(msg)
                     else:
-                        cls.paths.append([path, tags_out, output_dir])
-            elif ext != '.txt' and 'db.json' not in path:
-                print(f'{path}: not an image extension: "{ext}"')
+                        cls.err.add(msg)
+                else:
+                    cls.paths.append([path, tags_out, output_dir])
 
 
 def get_i_wt(stored: float) -> Tuple[int, float]:
@@ -212,10 +219,10 @@ class QData:
     # representing the (cumulative) current interrogations
     ratings = defaultdict(float)
     tags = defaultdict(list)
+    discarded_tags = defaultdict(list)
     in_db = {}
     for_tags_file = defaultdict(lambda: defaultdict(float))
 
-    inverse = False
     had_new = False
     err = set()
     image_dups = defaultdict(set)
@@ -248,30 +255,32 @@ class QData:
     def clear(cls, mode: int) -> None:
         """ clear tags and ratings """
         cls.tags.clear()
+        cls.discarded_tags.clear()
         cls.ratings.clear()
         cls.for_tags_file.clear()
-        if mode != 1:
+        if mode > 0:
             cls.in_db.clear()
-        if mode == 2:
+            cls.image_dups.clear()
+        if mode > 1:
             cls.json_db = None
             cls.weighed = (defaultdict(list), defaultdict(list))
             cls.query = {}
+        if mode > 2:
             cls.add_tags = []
             cls.keep_tags = set()
             cls.exclude_tags = []
             cls.search_tags = {}
             cls.replace_tags = []
-            cls.imafe_dups.clear()
 
     @classmethod
-    def test_add(cls, tag: str, current: str, incompatble: list) -> None:
+    def test_add(cls, tag: str, current: str, incompatible: list) -> None:
         """ check if there are incompatible collections """
         msg = f'Empty tag in {current} tags'
         if tag == '':
             cls.err.add(msg)
             return
         cls.err.discard(msg)
-        for bad in incompatble:
+        for bad in incompatible:
             if current < bad:
                 msg = f'"{tag}" is both in {bad} and {current} tags'
             else:
@@ -338,8 +347,8 @@ class QData:
         un_re = re_comp(r' exclude(?: and \w+)? tags')
         cls.err = {err for err in cls.err if not un_re.search(err)}
         for excl in map(str.strip, exclude.split(',')):
-            incompatble = ['add', 'keep', 'search', 'replace']
-            cls.test_add(excl, 'exclude', incompatble)
+            incompatible = ['add', 'keep', 'search', 'replace']
+            cls.test_add(excl, 'exclude', incompatible)
 
     @classmethod
     def update_search(cls, search_str: str) -> None:
@@ -349,8 +358,8 @@ class QData:
         un_re = re_comp(r' search(?: and \w+)? tags')
         cls.err = {err for err in cls.err if not un_re.search(err)}
         for rex in map(str.strip, search_str.split(',')):
-            incompatble = ['add', 'keep', 'exclude', 'replace']
-            cls.test_add(rex, 'search', incompatble)
+            incompatible = ['add', 'keep', 'exclude', 'replace']
+            cls.test_add(rex, 'search', incompatible)
 
         msg = 'Unequal number of search and replace tags'
         if len(cls.search_tags) != len(cls.replace_tags):
@@ -395,9 +404,6 @@ class QData:
                         cls.err.add(msg)
                     else:
                         cls.err.discard(msg)
-                for key in ["add", "keep", "exclude", "search", "replace"]:
-                    if key in data and data[key] != '':
-                        getattr(cls, f"update_{key}")(data[key])
                 cls.weighed = (
                     defaultdict(list, data["rating"]),
                     defaultdict(list, data["tag"])
@@ -410,18 +416,10 @@ class QData:
     def write_json(cls) -> None:
         """ write db.json """
         if cls.json_db is not None:
-            search = sorted(cls.search_tags.items(), key=lambda x: x[0])
-            search = [x[1].pattern for x in search]
-            exclude = [x.pattern for x in cls.exclude_tags]
             data = {
                 "rating": cls.weighed[0],
                 "tag": cls.weighed[1],
                 "query": cls.query,
-                "add": ','.join(cls.add_tags),
-                "keep": ','.join(cls.keep_tags),
-                "exclude": ','.join(exclude),
-                "search": ','.join([x[1] for x in search]),
-                "repl": ','.join(cls.replace_tags)
             }
             cls.json_db.write_text(dumps(data, indent=2))
             print(f'Wrote {cls.json_db}: {len(cls.query)} interrogations, '
@@ -466,7 +464,7 @@ class QData:
             tag = tag.replace('_', ' ')
 
         if getattr(shared.opts, 'tagger_escape', False):
-            tag = tag_escape_pattern.sub(r'\\\1', tag)
+            tag = re_special.sub(r'\\\1', tag)  # tag_escape_pattern
 
         for i, regex in cls.search_tags.items():
             if re_match(regex, tag):
@@ -476,29 +474,12 @@ class QData:
         return tag
 
     @classmethod
-    def inverse_apply_filters(cls, tags: List[Tuple[str, float]]) -> None:
-        """ inverse: List all tags marked for exclusion """
-        for tag, val in tags:
-            tag = cls.correct_tag(tag)
-
-            if tag in cls.keep_tags or tag in cls.add_tags:
-                continue
-
-            if cls.is_excluded(tag) or val < cls.threshold:
-                cls.tags[tag].append(val)
-
-    @classmethod
-    def apply_filters(cls, data) -> Set[str]:
+    def apply_filters(cls, data) -> None:
         """ apply filters to query data, store in db.json if required """
         # data = (path, fi_key, tags, ratings, new)
         # fi_key == '' means this is a new file or interrogation for that file
 
         tags = sorted(data[4].items(), key=lambda x: x[1], reverse=True)
-        if cls.inverse:
-            cls.inverse_apply_filters(tags)
-            return
-
-        # not inverse: display all tags marked for inclusion
 
         fi_key = data[2]
         index = len(cls.query)
@@ -527,6 +508,8 @@ class QData:
                 tag = cls.correct_tag(tag)
                 if tag not in cls.keep_tags:
                     if cls.is_excluded(tag) or val < cls.threshold:
+                        if tag not in cls.add_tags:
+                            cls.discarded_tags[tag].append(val)
                         continue
                 if data[1] != '':
                     current = cls.for_tags_file[data[1]].get(tag, 0.0)
@@ -561,14 +544,13 @@ class QData:
 
         # process the retrieved from db and add them to the stats
         for got in cls.in_db.values():
-            no_floats = filter(lambda x: not isinstance(x[0], float), got[3].items())
-            sorted_tags = ','.join(f'({k},{v:.1f})' for (k,v) in sorted(no_floats, key=lambda x: x[0]))
+            no_floats = sorted(filter(lambda x: not isinstance(x[0], float),
+                               got[3].items()), key=lambda x: x[0])
+            sorted_tags = ','.join(f'({k},{v:.1f})' for (k, v) in no_floats)
             QData.image_dups[sorted_tags].add(got[0])
             cls.apply_filters(got)
 
         # average
-        if cls.inverse:
-            return cls.finalize_inverse(count)
         return cls.finalize(count)
 
     @staticmethod
@@ -577,22 +559,26 @@ class QData:
         return sorted(tags.items(), key=lambda x: x[1], reverse=True)
 
     @classmethod
+    def get_image_dups(cls) -> List[str]:
+        # first sort values so that those without a comma come first
+        ordered = sorted(cls.image_dups.items(), key=lambda x: ',' in x[0])
+        return [str(x) for s in ordered if len(s[1]) > 1 for x in s[1]]
+
+    @classmethod
     def finalize(cls, count: int) -> ItRetTP:
         """ finalize the query, return the results """
+
         count += len(cls.in_db)
         if count == 0:
-            return [None, None, None, 'no results for query']
+            return None, None, None, 'no results for query'
 
-        tags_str, ratings, tags = '', {}, {}
+        ratings, tags, discarded_tags = {}, {}, {}
 
         for val in cls.for_tags_file.values():
             for k in cls.add_tags:
                 val[k] = 1.0 * count
 
         for k in cls.add_tags:
-            escaped = html_escape(k)
-            tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
-                        f"""true)'>{escaped}</a>"""
             tags[k] = 1.0
 
         for k, lst in cls.tags.items():
@@ -604,14 +590,16 @@ class QData:
                 tags[k] = sum(lst) / count
                 # trigger an event to place the tag in the active tags list
                 # replace if k interferes with html code
-                escaped = html_escape(k)
-                tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
-                            f"""true)'>{escaped}</a>"""
             else:
+                discarded_tags[k] = sum(lst) / count
                 for remaining_tags in cls.for_tags_file.values():
                     if k in remaining_tags:
                         if k not in cls.add_tags and k not in cls.keep_tags:
                             del remaining_tags[k]
+
+        for k, lst in cls.discarded_tags.items():
+            fraction_of_queries = len(lst) / count
+            discarded_tags[k] = sum(lst) / count
 
         for ent, val in cls.ratings.items():
             ratings[ent] = val / count
@@ -626,30 +614,11 @@ class QData:
                 sorted_tags = [k for k, v in sorted_tags]
             file.write_text(', '.join(sorted_tags), encoding='utf-8')
 
-        print('all done :)')
-        return (tags_str[2:], ratings, tags, '')
+        warn = ""
+        if len(QData.err) > 0:
+            warn = "Warnings (fix and try again - it should be cheap):<ul>" + \
+                   ''.join([f'<li>{x}</li>' for x in QData.err]) + "</ul>"
 
-    @classmethod
-    def finalize_inverse(cls, count: int) -> ItRetTP:
-        """ finalize the query, return the results """
-        count += len(cls.in_db)
-        if count == 0:
-            return [None, None, None, 'no results for query']
-
-        tags_str, ratings, tags = '', {}, {}
-
-        for k, lst in cls.tags.items():
-            # len(!) fraction of the all interrogations was above the threshold
-            fraction_of_queries = len(lst) / count
-
-            if fraction_of_queries < cls.tag_frac_threshold:
-                # store the average of those interrogations sum(!) / count
-                tags[k] = sum(lst) / count
-                # trigger an event to place the tag in the active tags list
-                # replace if k interferes with html code
-                escaped = html_escape(k)
-                tags_str += f""", <a href='javascript:tag_clicked("{k}", """\
-                            f"""false)'>{escaped}</a>"""
-
-        print('all done :)')
-        return (tags_str[2:], ratings, tags, '')
+        if count > 1 and len(cls.get_image_dups()) > 0:
+            warn += "There were duplicates, see gallery tab"
+        return ratings, tags, discarded_tags, warn
