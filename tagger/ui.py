@@ -3,15 +3,15 @@ from typing import Dict, Tuple, List
 import gradio as gr
 from PIL import Image
 from packaging import version
-
-from modules import ui
-from modules import generation_parameters_copypaste as parameters_copypaste
-
 from tensorflow import __version__ as tf_version
-from webui import wrap_gradio_gpu_call
-from tagger import utils
-from tagger.interrogator import Interrogator as It
-from tagger.uiset import IOData, QData, ItRetTP
+
+from modules import ui  # pylint: disable=import-error
+from modules import generation_parameters_copypaste as parameters_copypaste  # pylint: disable=import-error # noqa
+
+from webui import wrap_gradio_gpu_call  # pylint: disable=import-error
+from tagger import utils  # pylint: disable=import-error
+from tagger.interrogator import Interrogator as It  # pylint: disable=E0401
+from tagger.uiset import IOData, QData, ItRetTP  # pylint: disable=import-error
 
 TAG_INPUTS = ["add", "keep", "exclude", "search", "replace"]
 

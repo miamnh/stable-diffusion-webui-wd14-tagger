@@ -1,19 +1,21 @@
-from modules import shared
+"""Settings tab entries for the tagger module"""
 from typing import List
+from modules import shared  # pylint: disable=import-error
 from gradio import inputs as gr
 
 # kaomoji from WD 1.4 tagger csv. thanks, Meow-San#5400!
-DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, 3_3, 6_9, >_o, @_@, ^_^, o_o, u_u, x_x, |_|, ||_||'
+DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, 3_3, 6_9, >_o, @_@, ^_^, o_o, u_u, x_x, |_|, ||_||'  # pylint: disable=line-too-long # noqa: E501
 
 DEFAULT_OFF = '[name].[output_extension]'
 
 
-def slider_wrapper(value, elem_id, **kwargs):
+def slider_wrapper(_value, _elem_id, **kwargs):
     # required or else gradio will throw errors
     return gr.Slider(**kwargs)
 
 
 def on_ui_settings():
+    """Called when the UI settings tab is opened"""
     Its = InterrogatorSettings
     section = 'tagger', 'Tagger'
     shared.opts.add_option(
@@ -126,6 +128,7 @@ def on_ui_settings():
             section=section,
         ),
     )
+
 
 def split_str(string: str, separator=',') -> List[str]:
     return [x.strip() for x in string.split(separator) if x]

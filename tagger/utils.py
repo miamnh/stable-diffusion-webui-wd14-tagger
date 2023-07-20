@@ -1,13 +1,15 @@
+"""Utility functions for the tagger module"""
 import os
 
 from typing import List, Dict
 from pathlib import Path
 
-from modules import shared, scripts
-from preload import default_ddp_path, default_onnx_path
-from tagger.preset import Preset
-from tagger.interrogator import Interrogator, DeepDanbooruInterrogator, MLDanbooruInterrogator
-from tagger.interrogator import WaifuDiffusionInterrogator
+from modules import shared, scripts  # pylint: disable=import-error
+from preload import default_ddp_path, default_onnx_path  # pylint: disable=E0401 # noqa: E501
+from tagger.preset import Preset  # pylint: disable=import-error
+from tagger.interrogator import Interrogator, DeepDanbooruInterrogator, \
+                                MLDanbooruInterrogator  # pylint: disable=E0401 # noqa: E501
+from tagger.interrogator import WaifuDiffusionInterrogator  # pylint: disable=E0401 # noqa: E501
 
 preset = Preset(Path(scripts.basedir(), 'presets'))
 

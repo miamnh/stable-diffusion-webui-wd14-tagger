@@ -12,12 +12,12 @@ from functools import partial
 from html import escape as html_escape
 from collections import defaultdict
 from PIL import Image
-from modules import shared
-from modules.deepbooru import re_special as tag_escape_pattern
 
-from tagger import format as tags_format
+from modules import shared  # pylint: disable=import-error
+from modules.deepbooru import re_special  # pylint: disable=import-error
+from tagger import format as tags_format  # pylint: disable=import-error
+from tagger import settings  # pylint: disable=import-error
 
-from tagger import settings
 Its = settings.InterrogatorSettings
 
 # PIL.Image.registered_extensions() returns only PNG if you call early
@@ -273,7 +273,7 @@ class QData:
             cls.exclude_tags = []
             cls.search_tags = {}
             cls.replace_tags = []
-            cls.imafe_dups.clear()
+            cls.image_dups.clear()
 
     @classmethod
     def test_add(cls, tag: str, current: str, incompatble: list) -> None:
@@ -467,7 +467,7 @@ class QData:
             tag = tag.replace('_', ' ')
 
         if getattr(shared.opts, 'tagger_escape', False):
-            tag = tag_escape_pattern.sub(r'\\\1', tag)
+            tag = re_special.sub(r'\\\1', tag)  # tag_escape_pattern
 
         for i, regex in cls.search_tags.items():
             if re_match(regex, tag):
@@ -547,8 +547,9 @@ class QData:
 
         # process the retrieved from db and add them to the stats
         for got in cls.in_db.values():
-            no_floats = filter(lambda x: not isinstance(x[0], float), got[3].items())
-            sorted_tags = ','.join(f'({k},{v:.1f})' for (k,v) in sorted(no_floats, key=lambda x: x[0]))
+            no_floats = sorted(filter(lambda x: not isinstance(x[0], float),
+                               got[3].items()), key=lambda x: x[0])
+            sorted_tags = ','.join(f'({k},{v:.1f})' for (k, v) in no_floats)
             QData.image_dups[sorted_tags].add(got[0])
             cls.apply_filters(got)
 

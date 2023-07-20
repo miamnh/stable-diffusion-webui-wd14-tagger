@@ -2,7 +2,7 @@
 import os
 import sys
 
-from launch import run
+from launch import run  # pylint: disable=import-error
 
 NAME = "WD14-tagger"
 req_file = os.path.join(os.path.dirname(os.path.realpath(__file__)),

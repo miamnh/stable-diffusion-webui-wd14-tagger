@@ -1,7 +1,7 @@
-# Purpose: Pydantic models for the API."""
+"""Purpose: Pydantic models for the API."""
 from typing import List, Dict
 
-from modules.api import models as sd_models
+from modules.api import models as sd_models  # pylint: disable=E0401
 from pydantic import BaseModel, Field
 
 
@@ -21,7 +21,7 @@ class TaggerInterrogateRequest(sd_models.InterrogateRequest):
     )
 
 
-class TaggerInterrogateResponse(BaseModel):
+class TaggerInterrogateResponse(BaseModel):  
     """Interrogate response model"""
     caption: Dict[str, float] = Field(
         title='Caption',
