@@ -454,7 +454,9 @@ class WaifuDiffusionInterrogator(Interrogator):
             with io.open(file=mpath, mode='r', encoding='utf-8') as filename:
                 try:
                     data = json.load(filename)
-                    data.append(download_model)
+                    # No need to append if it's already contained
+                    if download_model not in data:
+                        data.append(download_model)
                 except json.JSONDecodeError as err:
                     print(f'Adding download_model {mpath} raised {repr(err)}')
                     data = [download_model]
