@@ -215,9 +215,6 @@ class Interrogator:
             QData.apply_filters(data)
             QData.had_new = True
 
-    def large_batch_interrogate(self, images: List, dry_run=False) -> str:
-        raise NotImplementedError()
-
     def batch_interrogate(self) -> ItRetTP:
         """ Interrogate all images in the input list """
         QData.tags.clear()
