@@ -28,12 +28,12 @@ use_cpu = ('all' in shared.cmd_opts.use_cpu) or (
 onnxrt_providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
 
 if use_cpu:
-    import gc
+    #import gc
     TF_DEVICE_NAME = '/cpu:0'
     onnxrt_providers.pop(0)
     print(f'== WD14 tagger: cpu, {uname()} ==')
 else:
-    from numba import cuda
+    #from numba import cuda
     TF_DEVICE_NAME = '/gpu:0'
     print(f'== WD14 tagger gpu, {uname()} ==')
 
@@ -292,18 +292,6 @@ class DeepDanbooruInterrogator(Interrogator):
             )
 
     def unload(self) -> bool:
-        if getattr(shared.opts, 'tagger_enable_unload', True):
-            unloaded = super().unload()
-
-            if unloaded:
-                if use_cpu:
-                    import tensorflow as tf
-                    tf.keras.backend.clear_session()
-                    gc.collect()
-                else:
-                    device = cuda.get_current_device()
-                    device.reset()
-            return unloaded
         return False
 
     def interrogate(
