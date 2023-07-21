@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import io
 import json
-from platform import system
+from platform import system, uname
 from typing import Tuple, List, Dict, Callable
 from pandas import read_csv
 from PIL import Image, UnidentifiedImageError
@@ -31,9 +31,11 @@ if use_cpu:
     import gc
     TF_DEVICE_NAME = '/cpu:0'
     onnxrt_providers.pop(0)
+    print(f'== WD14 tagger: cpu, {uname()} ==')
 else:
     from numba import cuda
     TF_DEVICE_NAME = '/gpu:0'
+    print(f'== WD14 tagger gpu, {uname()} ==')
 
     if shared.cmd_opts.device_id is not None:
         try:
