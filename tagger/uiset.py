@@ -35,7 +35,8 @@ ItRetTP = Tuple[
 ]
 
 # If the interrogation weights truely have the precision, increase this
-# but then also make sure to delete past db.json files
+# but it should probably stay below 16, or 32 if certified u64, somehow.
+# Note that you will have to re-interrogate all images if you change this.
 INDEX_SHIFT = 11
 
 
@@ -196,20 +197,6 @@ class IOData:
                     cls.paths.append([path, tags_out, output_dir])
 
 
-def get_i_wt(val: int) -> Tuple[int, float]:
-    """
-    in db.json or InterrogationDB.weighed, with weights & increment in the list
-    similar for the "query" dict. Same increment per filestamp-interrogation.
-    the index is in the upper bits, the weight in the lower bits
-    """
-    return val >> INDEX_SHIFT, 1.0 / float(val & ((1 << INDEX_SHIFT) - 1))
-
-
-def mux_i_wt(i: int, weight: float) -> int:
-    """ reverse of get_i_wt """
-    return (i << INDEX_SHIFT) | (int(1.0 / weight) & ((1 << INDEX_SHIFT) - 1))
-
-
 class QData:
     """ Query data: contains parameters for the query """
     add_tags = []
@@ -224,6 +211,7 @@ class QData:
     json_db = None
     weighed = (defaultdict(list), defaultdict(list))
     query = {}
+    index_shift = INDEX_SHIFT
 
     # representing the (cumulative) current interrogations
     ratings = defaultdict(float)
@@ -392,6 +380,23 @@ class QData:
             cls.err.discard(msg)
 
     @classmethod
+    def get_i_wt(cls, val: int) -> Tuple[int, float]:
+        """
+        in db.json or QData.weighed, the weights & increment in the list are
+        encoded. Each filestamp-interrogation corresponds to an incrementing
+        index. This index is stored in the upper bits while the weight is
+        inverted and stored in the lower bits; masked, so with fixed precision.
+        """
+        bit_mask = ((1 << cls.index_shift) - 1)
+        return val >> cls.index_shift, 1.0 / float(val & bit_mask)
+
+    @classmethod
+    def mux_i_wt(cls, i: int, weight: float) -> int:
+        """ reverse of get_i_wt """
+        bit_mask = ((1 << cls.index_shift) - 1)
+        return (i << cls.index_shift) | (int(1.0 / weight) & bit_mask)
+
+    @classmethod
     def read_json(cls, outdir) -> None:
         """ read db.json if it exists """
         cls.json_db = None
@@ -422,8 +427,13 @@ class QData:
                     tag_items = list(data["tag"].items())
                     if len(tag_items) == 0:
                         raise KeyError('no tags,')
+                    if "meta" in data:
+                        old = data["meta"]["index_shift"]
+                        if old != INDEX_SHIFT:
+                            # user changed INDEX_SHIFT, requery db
+                            raise KeyError(f'shifted: {old} => {INDEX_SHIFT}')
                     # one-time db conversion for backwards compatibility
-                    # TODO: remove float -> int after a few months.
+                    # TODO: remove float -> int after a few months (keep else)
                     if isinstance(list(list(tag_items[0])[1])[0], float):
                         for key in ["tag", "rating"]:
                             for tag, lst in data[key].items():
@@ -433,13 +443,13 @@ class QData:
                                     if i > len(cls.query):
                                         raise KeyError(f'[{key}][{tag}] {i} >')
                                     wt = stored - i
-                                    new_lst.append(mux_i_wt(i, wt))
+                                    new_lst.append(cls.mux_i_wt(i, wt))
                                 data[key][tag] = new_lst
                     else:
                         for key in ["tag", "rating"]:
                             for tag, lst in data[key].items():
                                 for stored in lst:
-                                    i = get_i_wt(stored)[0]
+                                    i = cls.get_i_wt(stored)[0]
                                     if i > len(cls.query):
                                         raise KeyError(f'[{key}][{tag}] {i} >')
                 except KeyError as err:
@@ -447,6 +457,7 @@ class QData:
                     cls.query = {}
                     data["tag"] = []
                     data["rating"] = []
+                cls.index_shift = INDEX_SHIFT
 
                 cls.weighed = (
                     defaultdict(list, data["rating"]),
@@ -487,7 +498,7 @@ class QData:
         data = ({}, {})
         for j in range(2):
             for ent, lst in cls.weighed[j].items():
-                for i, val in map(get_i_wt, lst):
+                for i, val in map(cls.get_i_wt, lst):
                     if i == index:
                         data[j][ent] = val
         QData.in_db[index] = ('', '', '') + data
@@ -529,7 +540,7 @@ class QData:
         # loop over ratings
         for rating, val in ratings:
             if fi_key != '':
-                cls.weighed[0][rating].append(mux_i_wt(index, val))
+                cls.weighed[0][rating].append(cls.mux_i_wt(index, val))
             cls.ratings[rating] += val
 
         count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
@@ -543,7 +554,7 @@ class QData:
                 continue
 
             if fi_key != '' and val >= 0.005:
-                cls.weighed[1][tag].append(mux_i_wt(index, val))
+                cls.weighed[1][tag].append(cls.mux_i_wt(index, val))
 
             if count < max_ct:
                 tag = cls.correct_tag(tag)
@@ -578,7 +589,7 @@ class QData:
         # collect the weights per file/interrogation of the prior in db stored.
         for index in range(2):
             for ent, lst in cls.weighed[index].items():
-                for i, val in map(get_i_wt, lst):
+                for i, val in map(cls.get_i_wt, lst):
                     if i not in cls.in_db:
                         continue
                     cls.in_db[i][3+index][ent] = val
