@@ -34,6 +34,10 @@ ItRetTP = Tuple[
     str,               # error message
 ]
 
+# If the interrogation weights truely have the precision, increase this
+# but then also make sure to delete past db.json files
+INDEX_SHIFT = 11
+
 
 class IOData:
     """ data class for input and output paths """
@@ -192,13 +196,18 @@ class IOData:
                     cls.paths.append([path, tags_out, output_dir])
 
 
-def get_i_wt(stored: float) -> Tuple[int, float]:
+def get_i_wt(val: int) -> Tuple[int, float]:
     """
-    in db.json or InterrogationDB.weighed, with weights + increment in the list
+    in db.json or InterrogationDB.weighed, with weights & increment in the list
     similar for the "query" dict. Same increment per filestamp-interrogation.
+    the index is in the upper bits, the weight in the lower bits
     """
-    i = ceil(stored) - 1
-    return i, stored - i
+    return val >> INDEX_SHIFT, 1.0 / float(val & ((1 << INDEX_SHIFT) - 1))
+
+
+def mux_i_wt(i: int, weight: float) -> int:
+    """ reverse of get_i_wt """
+    return (i << INDEX_SHIFT) | (int(1.0 / weight) & ((1 << INDEX_SHIFT) - 1))
 
 
 class QData:
@@ -389,6 +398,7 @@ class QData:
         if getattr(shared.opts, 'tagger_auto_serde_json', True):
             cls.json_db = outdir.joinpath('db.json')
             if cls.json_db.is_file():
+                print(f'Reading {cls.json_db}')
                 cls.had_new = False
                 msg = f'Error reading {cls.json_db}'
                 cls.err.discard(msg)
@@ -398,17 +408,50 @@ class QData:
                     print(f'{msg}: {repr(err)}')
                     cls.err.add(msg)
                     return
-                for key in ["tag", "rating", "query"]:
+
+                for key in ["query", "tag", "rating"]:
                     msg = f'{cls.json_db}: missing {key} key.'
                     if key not in data:
                         cls.err.add(msg)
                     else:
                         cls.err.discard(msg)
+                cls.query = data["query"]
+
+                # consistency checks; index against query length
+                try:
+                    tag_items = list(data["tag"].items())
+                    if len(tag_items) == 0:
+                        raise KeyError('no tags,')
+                    # one-time db conversion for backwards compatibility
+                    # TODO: remove float -> int after a few months.
+                    if isinstance(list(list(tag_items[0])[1])[0], float):
+                        for key in ["tag", "rating"]:
+                            for tag, lst in data[key].items():
+                                new_lst = []
+                                for stored in lst:
+                                    i = ceil(stored) - 1
+                                    if i > len(cls.query):
+                                        raise KeyError(f'[{key}][{tag}] {i} >')
+                                    wt = stored - i
+                                    new_lst.append(mux_i_wt(i, wt))
+                                data[key][tag] = new_lst
+                    else:
+                        for key in ["tag", "rating"]:
+                            for tag, lst in data[key].items():
+                                for stored in lst:
+                                    i = get_i_wt(stored)[0]
+                                    if i > len(cls.query):
+                                        raise KeyError(f'[{key}][{tag}] {i} >')
+                except KeyError as err:
+                    print(f'{cls.json_db}: {err} len(query).')
+                    cls.query = {}
+                    data["tag"] = []
+                    data["rating"] = []
+
                 cls.weighed = (
                     defaultdict(list, data["rating"]),
                     defaultdict(list, data["tag"])
                 )
-                cls.query = data["query"]
                 print(f'Read {cls.json_db}: {len(cls.query)} interrogations, '
                       f'{len(cls.tags)} tags.')
 
@@ -438,9 +481,7 @@ class QData:
         return cls.query[fi_key][1]
 
     @classmethod
-    def single_data(
-        cls, fi_key: str
-    ) -> Tuple[Dict[str, float], Dict[str, float]]:
+    def single_data(cls, fi_key: str) -> None:
         """ get tags and ratings for filestamp-interrogator """
         index = cls.query.get(fi_key)[1]
         data = ({}, {})
@@ -488,7 +529,7 @@ class QData:
         # loop over ratings
         for rating, val in ratings:
             if fi_key != '':
-                cls.weighed[0][rating].append(val + index)
+                cls.weighed[0][rating].append(mux_i_wt(index, val))
             cls.ratings[rating] += val
 
         count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
@@ -502,7 +543,7 @@ class QData:
                 continue
 
             if fi_key != '' and val >= 0.005:
-                cls.weighed[1][tag].append(val + index)
+                cls.weighed[1][tag].append(mux_i_wt(index, val))
 
             if count < max_ct:
                 tag = cls.correct_tag(tag)
