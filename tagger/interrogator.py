@@ -394,11 +394,11 @@ class WaifuDiffusionInterrogator(Interrogator):
             model_path = hf_hub_download(
                 self.repo_id,
                 self.model_path,
-                cache_dir=mdir)
+                local_dir=mdir)
             tags_path = hf_hub_download(
                 self.repo_id,
                 self.tags_path,
-                cache_dir=mdir)
+                local_dir=mdir)
         else:
             model_path = self.local_model
             tags_path = self.local_tags
