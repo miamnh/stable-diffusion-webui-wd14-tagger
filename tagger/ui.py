@@ -81,14 +81,16 @@ def on_gallery() -> List:
     return QData.get_image_dups()
 
 
-def on_interrogate_image(
+def on_interrogate_image(*args) -> COMMON_OUTPUT:
+    # hack brcause image interrogaion occurs twice
+    It.odd_increment = It.odd_increment + 1
+    if It.odd_increment & 1 == 1:
+       return (None, None, None, None, None, '')
+    return on_interrogate_image_submit(*args)
+
+def on_interrogate_image_submit(
     image: Image, name: str, filt: str, *args
 ) -> COMMON_OUTPUT:
-    # hack brcause image interrogaion occurs twice
-    # It.odd_increment = It.odd_increment + 1
-    # if It.odd_increment & 1 == 1:
-    #    return (None, None, None, None, None, '')
-
     for i, val in enumerate(args):
         part = TAG_INPUTS[i]
         if val != It.input[part]:
@@ -453,9 +455,11 @@ def on_ui_tabs():
                        [tag_input[tag] for tag in TAG_INPUTS]
 
         # interrogation events
-        for func in [image.change, image_submit.click]:
-            func(fn=wrap_gradio_gpu_call(on_interrogate_image),
-                 inputs=[image] + common_input, outputs=common_output)
+        image_submit.click(fn=wrap_gradio_gpu_call(on_interrogate_image_submit),
+             inputs=[image] + common_input, outputs=common_output)
+
+        image.change(fn=wrap_gradio_gpu_call(on_interrogate_image),
+             inputs=[image] + common_input, outputs=common_output)
 
         batch_submit.click(fn=wrap_gradio_gpu_call(on_interrogate),
                            inputs=[input_glob, output_dir] + common_input,
