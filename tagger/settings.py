@@ -120,14 +120,6 @@ def on_ui_settings():
             section=section,
         ),
     )
-    shared.opts.add_option(
-        key='tagger_enable_unload',
-        info=shared.OptionInfo(
-            False,
-            label='Unload tensorflow models from memory (experimental).',
-            section=section,
-        ),
-    )
 
 
 def split_str(string: str, separator=',') -> List[str]:

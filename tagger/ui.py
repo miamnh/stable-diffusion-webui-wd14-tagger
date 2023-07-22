@@ -39,12 +39,8 @@ def unload_interrogators() -> List[str]:
             else:
                 remaining_models = remaining_models + f'<li>{i.name}</li>'
     if remaining_models != '':
-        remaining_models = remaining_models + """
-</ul>Experimental: Settings -> Tagger -> Unload tensorflow models..<br>
-if no memory is released: <a href=
-"https://github.com/picobyte/stable-diffusion-webui-wd14-tagger/issues/17"
-target=”_blank”>issue</a> + OS, gpu/cpu, and nr of (V)RAM
-"""
+        remaining_models = remaining_models + "Some tensorflow models could "\
+                           "not be unloaded, a known issue."
     QData.clear(1)
 
     return (f'{unloaded_models} model(s) unloaded{remaining_models}',)

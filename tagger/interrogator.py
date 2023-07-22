@@ -584,17 +584,6 @@ class WaifuDiffusionInterrogator(Interrogator):
             process_images(filepaths, image_list)
         QData.add_tag = orig_add_tags
         del os.environ["TF_XLA_FLAGS"]
-        # Again using tensorflow, let's try releasing the memory
-        if getattr(shared.opts, 'tagger_enable_unload', True):
-            unloaded = super().unload()
-
-            if unloaded:
-                if use_cpu:
-                    tf.keras.backend.clear_session()
-                    gc.collect()
-                else:
-                    device = cuda.get_current_device()
-                    device.reset()
 
 
 class MLDanbooruInterrogator(Interrogator):
