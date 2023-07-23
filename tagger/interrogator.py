@@ -388,17 +388,18 @@ class WaifuDiffusionInterrogator(Interrogator):
     def download(self) -> None:
         mdir = Path(shared.models_path, 'interrogators')
         if self.is_hf:
+            cache = getattr(shared.opts, 'tagger_hf_cache_dir', Its.hf_cache)
             print(f"Loading {self.name} model file from {self.repo_id}, "
                   f"{self.model_path}")
 
             model_path = hf_hub_download(
-                self.repo_id,
-                self.model_path,
-                local_dir=mdir)
+                repo_id=self.repo_id,
+                filename=self.model_path,
+                cache_dir=cache)
             tags_path = hf_hub_download(
-                self.repo_id,
-                self.tags_path,
-                local_dir=mdir)
+                repo_id=self.repo_id,
+                filename=self.tags_path,
+                cache_dir=cache)
         else:
             model_path = self.local_model
             tags_path = self.local_tags
@@ -604,11 +605,18 @@ class MLDanbooruInterrogator(Interrogator):
 
     def download(self) -> Tuple[str, str]:
         print(f"Loading {self.name} model file from {self.repo_id}")
+        cache = getattr(shared.opts, 'tagger_hf_cache_dir', Its.hf_cache)
 
         model_path = hf_hub_download(
-            repo_id=self.repo_id, filename=self.model_path)
+            repo_id=self.repo_id,
+            filename=self.model_path,
+            cache_dir=cache
+        )
         tags_path = hf_hub_download(
-            repo_id=self.repo_id, filename=self.tags_path)
+            repo_id=self.repo_id,
+            filename=self.tags_path,
+            cache_dir=cache
+        )
         return model_path, tags_path
 
     def load(self) -> None:
