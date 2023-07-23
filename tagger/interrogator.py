@@ -368,10 +368,15 @@ class HFInterrogator(Interrogator):
                     tp = signature.parameters[arg].annotation(val)
                     self.params[arg] = tp(val)
                 except TypeError:
-                    # unions, used for str of PathLike
-                    if val[0] == val[-1] and val[0] in "'\"":
-                        val = val[1:-1]
-                    self.params[arg] = str(val)
+                    if val == 'None':
+                        self.params[arg] = None
+                    elif arg == 'token' and val in {'True', 'False'}:
+                        self.params[arg] = val == 'True'
+                    else:
+                        # unions, used for str or PathLike
+                        if val[0] == val[-1] and val[0] in "'\"":
+                            val = val[1:-1]
+                        self.params[arg] = str(val)
             else:
                 print(f"Settings -> Tagger -> HuggingFace parameters: {arg}: "
                       "Invalid for hf_hub_download() => ignored.")
