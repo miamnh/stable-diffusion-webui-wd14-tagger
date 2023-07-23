@@ -3,7 +3,8 @@ import os
 from pathlib import Path
 import io
 import json
-from platform import system, uname
+import inspect
+from platform import uname
 from typing import Tuple, List, Dict, Callable
 from pandas import read_csv
 from PIL import Image, UnidentifiedImageError
@@ -28,12 +29,10 @@ use_cpu = ('all' in shared.cmd_opts.use_cpu) or (
 onnxrt_providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
 
 if use_cpu:
-    #import gc
     TF_DEVICE_NAME = '/cpu:0'
     onnxrt_providers.pop(0)
     print(f'== WD14 tagger: cpu, {uname()} ==')
 else:
-    #from numba import cuda
     TF_DEVICE_NAME = '/gpu:0'
     print(f'== WD14 tagger gpu, {uname()} ==')
 
@@ -112,7 +111,7 @@ class Interrogator:
         # run_mode 0 is dry run, 1 means run (alternating), 2 means disabled
         self.run_mode = 0 if hasattr(self, "large_batch_interrogate") else 2
 
-    def load(self):
+    def load(self) -> bool:
         raise NotImplementedError()
 
     def large_batch_interrogate(self, images: List, dry_run=False) -> str:
@@ -303,7 +302,8 @@ class DeepDanbooruInterrogator(Interrogator):
     ]:
         # init model
         if self.model is None:
-            self.load()
+            if not self.load():
+                return {}, {}
 
         import deepdanbooru.data as ddd
 
@@ -337,34 +337,69 @@ class DeepDanbooruInterrogator(Interrogator):
         raise NotImplementedError()
 
 
-# FIXME this is silly, in what scenario would the env change from MacOS to
-# another OS? TODO: remove if the author does not respond.
-def get_onnxrt():
-    try:
-        import onnxruntime
-        return onnxruntime
-    except ImportError:
-        # only one of these packages should be installed at one time in an env
-        # https://onnxruntime.ai/docs/get-started/with-python.html#install-onnx-runtime
-        # TODO: remove old package when the environment changes?
-        from launch import is_installed, run_pip
-        if not is_installed('onnxruntime'):
-            if system() == "Darwin":
-                package_name = "onnxruntime-silicon"
+class HFInterrogator(Interrogator):
+    """ Interrogator for HuggingFace models """
+    def __init__(
+        self,
+        name: str,
+        repo_id: str,
+        model_path: str,
+        tags_path: str,
+    ) -> None:
+        super().__init__(name)
+        self.repo_id = repo_id
+        self.model_path = model_path
+        self.tags_path = tags_path
+        self.model = None
+        self.local_model = None
+        self.local_tags = None
+        # tagger_hf_hub_down_opts contains args to hf_hub_download(). Parse
+        # and pass only the supported args.
+
+        attrs = getattr(shared.opts, 'tagger_hf_hub_down_opts',
+                        f'cache_dir="{Its.hf_cache}"')
+        attrs = [attr.split('=') for attr in map(str.strip, attrs.split(','))]
+
+        signature = inspect.signature(hf_hub_download)
+        self.params = {}
+        for arg, val in attrs:
+            if arg in signature.parameters:
+                try:
+                    tp = signature.parameters[arg].annotation(val)
+                    self.params[arg] = tp(val)
+                except TypeError:
+                    # unions, used for str of PathLike
+                    if val[0] == val[-1] and val[0] in "'\"":
+                        val = val[1:-1]
+                    self.params[arg] = str(val)
             else:
-                package_name = "onnxruntime-gpu"
-            package = os.environ.get(
-                'ONNXRUNTIME_PACKAGE',
-                package_name
-            )
+                print(f"Settings -> Tagger -> HuggingFace parameters: {arg}: "
+                      "Invalid for hf_hub_download() => ignored.")
 
-            run_pip(f'install {package}', 'onnxruntime')
+    def download(self) -> Tuple[str, str]:
+        print(f"Loading {self.name} model file from {self.repo_id}")
+        self.params['repo_id'] = self.repo_id
 
-    import onnxruntime
-    return onnxruntime
+        paths = [self.local_model, self.local_tags]
+
+        try:
+            for i, filename in enumerate([self.model_path,  self.tags_path]):
+                self.params['filename'] = filename
+                paths[i] = hf_hub_download(**self.params)
+        except Exception as err:
+            if str(err)[:25] != "Offline mode is enabled.":
+                print(f"hf_hub_download({self.params}: {err}")
+
+        return paths
+
+    def load_model(self, model_path) -> None:
+        import onnxruntime
+        self.model = onnxruntime.InferenceSession(model_path,
+                                                  providers=onnxrt_providers)
+        print(f'Loaded {self.name} model from {model_path}')
 
 
-class WaifuDiffusionInterrogator(Interrogator):
+class WaifuDiffusionInterrogator(HFInterrogator):
     """ Interrogator for Waifu Diffusion models """
     def __init__(
         self,
@@ -372,43 +407,17 @@ class WaifuDiffusionInterrogator(Interrogator):
         model_path='model.onnx',
         tags_path='selected_tags.csv',
         repo_id=None,
-        is_hf=True,
     ) -> None:
-        super().__init__(name)
-        self.repo_id = repo_id
-        self.model_path = model_path
-        self.tags_path = tags_path
+        super().__init__(name, repo_id, model_path, tags_path)
         self.tags = None
-        self.model = None
-        self.tags = None
-        self.local_model = None
-        self.local_tags = None
-        self.is_hf = is_hf
 
-    def download(self) -> None:
-        mdir = Path(shared.models_path, 'interrogators')
-        if self.is_hf:
-            cache = getattr(shared.opts, 'tagger_hf_cache_dir', Its.hf_cache)
-            print(f"Loading {self.name} model file from {self.repo_id}, "
-                  f"{self.model_path}")
-
-            model_path = hf_hub_download(
-                repo_id=self.repo_id,
-                filename=self.model_path,
-                cache_dir=cache)
-            tags_path = hf_hub_download(
-                repo_id=self.repo_id,
-                filename=self.tags_path,
-                cache_dir=cache)
-        else:
-            model_path = self.local_model
-            tags_path = self.local_tags
-
+    def update_model_json(self, model_path, tags_path):
         download_model = {
             'name': self.name,
             'model_path': model_path,
             'tags_path': tags_path,
         }
+        mdir = Path(shared.models_path, 'interrogators')
         mpath = Path(mdir, 'model.json')
 
         data = [download_model]
@@ -429,16 +438,22 @@ class WaifuDiffusionInterrogator(Interrogator):
 
         with io.open(mpath, 'w', encoding='utf-8') as filename:
             json.dump(data, filename)
-        return model_path, tags_path
 
-    def load(self) -> None:
+    def load(self) -> bool:
         model_path, tags_path = self.download()
-        ort = get_onnxrt()
-        self.model = ort.InferenceSession(model_path,
-                                          providers=onnxrt_providers)
 
-        print(f'Loaded {self.name} model from {self.repo_id}')
+        if not os.path.exists(model_path):
+            print(f'Model path {model_path} not found.')
+            return False
+
+        if not os.path.exists(tags_path):
+            print(f'Tags path {tags_path} not found.')
+            return False
+
+        self.load_model(model_path)
+        self.update_model_json(model_path, tags_path)
         self.tags = read_csv(tags_path)
+        return True
 
     def interrogate(
         self,
@@ -449,7 +464,8 @@ class WaifuDiffusionInterrogator(Interrogator):
     ]:
         # init model
         if self.model is None:
-            self.load()
+            if not self.load():
+                return {}, {}
 
         # code for converting the image and running the model is taken from the
         # link below. thanks, SmilingWolf!
@@ -541,7 +557,8 @@ class WaifuDiffusionInterrogator(Interrogator):
 
         # init model
         if not hasattr(self, 'model') or self.model is None:
-            self.load()
+            if not self.load():
+                return
 
         os.environ["TF_XLA_FLAGS"] = '--tf_xla_auto_jit=2 '\
                                      '--tf_xla_cpu_global_jit'
@@ -587,7 +604,7 @@ class WaifuDiffusionInterrogator(Interrogator):
         del os.environ["TF_XLA_FLAGS"]
 
 
-class MLDanbooruInterrogator(Interrogator):
+class MLDanbooruInterrogator(HFInterrogator):
     """ Interrogator for the MLDanbooru model. """
     def __init__(
         self,
@@ -596,39 +613,24 @@ class MLDanbooruInterrogator(Interrogator):
         model_path: str,
         tags_path='classes.json',
     ) -> None:
-        super().__init__(name)
-        self.model_path = model_path
-        self.tags_path = tags_path
-        self.repo_id = repo_id
+        super().__init__(name, repo_id, model_path, tags_path)
         self.tags = None
-        self.model = None
 
-    def download(self) -> Tuple[str, str]:
-        print(f"Loading {self.name} model file from {self.repo_id}")
-        cache = getattr(shared.opts, 'tagger_hf_cache_dir', Its.hf_cache)
-
-        model_path = hf_hub_download(
-            repo_id=self.repo_id,
-            filename=self.model_path,
-            cache_dir=cache
-        )
-        tags_path = hf_hub_download(
-            repo_id=self.repo_id,
-            filename=self.tags_path,
-            cache_dir=cache
-        )
-        return model_path, tags_path
-
-    def load(self) -> None:
+    def load(self) -> bool:
         model_path, tags_path = self.download()
 
-        ort = get_onnxrt()
-        self.model = ort.InferenceSession(model_path,
-                                          providers=onnxrt_providers)
-        print(f'Loaded {self.name} model from {model_path}')
+        if not os.path.exists(model_path):
+            print(f'Model path {model_path} not found.')
+            return False
+
+        if not os.path.exists(tags_path):
+            print(f'Tags path {tags_path} not found.')
+            return False
 
         with open(tags_path, 'r', encoding='utf-8') as filen:
             self.tags = json.load(filen)
+
+        return True
 
     def interrogate(
         self,
@@ -639,7 +641,8 @@ class MLDanbooruInterrogator(Interrogator):
     ]:
         # init model
         if self.model is None:
-            self.load()
+            if not self.load():
+                return {}, {}
 
         image = dbimutils.fill_transparent(image)
         image = dbimutils.resize(image, 448)  # TODO CUSTOMIZE

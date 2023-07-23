@@ -105,12 +105,11 @@ def refresh_interrogators() -> List[str]:
             if path.name == 'wd-v1-4-convnextv2-tagger-v2':
                 interrogators[path.name] = WaifuDiffusionInterrogator(
                     path.name,
-                    repo_id='SmilingWolf/SW-CV-ModelZoo',
-                    is_hf=False
+                    repo_id='SmilingWolf/SW-CV-ModelZoo'
                 )
             elif path.name == 'Z3D-E621-Convnext':
                 interrogators[path.name] = WaifuDiffusionInterrogator(
-                    'Z3D-E621-Convnext', is_hf=False)
+                    'Z3D-E621-Convnext')
             else:
                 raise NotImplementedError(f"Add {path.name} resolution similar"
                                           "to above here")
