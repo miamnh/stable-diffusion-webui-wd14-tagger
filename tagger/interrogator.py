@@ -10,10 +10,11 @@ from pandas import read_csv
 from PIL import Image, UnidentifiedImageError
 from numpy import asarray, float32, expand_dims, exp
 from tqdm import tqdm
-
 from huggingface_hub import hf_hub_download
-from modules import shared  # pylint: disable=import-error
 
+from modules.paths import extensions_dir
+from modules import shared
+from preload import default_ddp_path, default_onnx_path
 from tagger import settings  # pylint: disable=import-error
 from tagger.uiset import QData, IOData  # pylint: disable=import-error
 from . import dbimutils  # pylint: disable=import-error # noqa
@@ -59,6 +60,7 @@ class Interrogator:
     }
     output = None
     odd_increment = 0
+    entries = {}
 
     @classmethod
     def flip(cls, key):
@@ -91,6 +93,98 @@ class Interrogator:
 
         return setter
 
+    @classmethod
+    def refresh(cls) -> List[str]:
+        """Refreshes the interrogator entries"""
+        if len(cls.entries) == 0:
+            it_path = Path(os.path.join(
+                extensions_dir,
+                'stable-diffusion-webui-wd14-tagger/interrogators.json'
+            ))
+            if not it_path.exists():
+                raise FileNotFoundError(f'{it_path} not found.')
+
+            with open(it_path) as filename:
+                raw = json.load(filename)
+
+                for name, it in raw.items():
+                    if it["class"] == "DeepDanbooruInterrogator":
+                        It_type = DeepDanbooruInterrogator
+                    elif it["class"] == "WaifuDiffusionInterrogator":
+                        It_type = WaifuDiffusionInterrogator
+                    elif it["class"] == "MLDanbooruInterrogator":
+                        It_type = MLDanbooruInterrogator
+                    else:
+                        raise ValueError(f'Unimplemented: {it["class"]}')
+
+                    cls.entries[name] = It_type(**it["repo_specs"])
+
+    # load deepdanbooru project
+        ddp_path = getattr(shared.cmd_opts, 'deepdanbooru_projects_path',
+                           default_ddp_path)
+        onnx_path = getattr(shared.cmd_opts, 'onnxtagger_path',
+                            default_onnx_path)
+        os.makedirs(ddp_path, exist_ok=True)
+        os.makedirs(onnx_path, exist_ok=True)
+
+        for path in os.scandir(ddp_path):
+            print(f"Scanning {path} as deepdanbooru project")
+            if not path.is_dir():
+                print(f"Warning: {path} is not a directory, skipped")
+                continue
+
+            if not Path(path, 'project.json').is_file():
+                print(f"Warning: {path} has no project.json, skipped")
+                continue
+
+            cls.entries[path.name] = DeepDanbooruInterrogator(path.name, path)
+        # scan for onnx models as well
+        for path in os.scandir(onnx_path):
+            print(f"Scanning {path} as onnx model")
+            if not path.is_dir():
+                print(f"Warning: {path} is not a directory, skipped")
+                continue
+
+            onnx_files = []
+            for file_name in os.scandir(path):
+                if file_name.name.endswith('.onnx'):
+                    onnx_files.append(file_name)
+
+            if len(onnx_files) != 1:
+                print(f"Warning: {path}: multiple .onnx models => skipped")
+                continue
+            local_path = Path(path, onnx_files[0].name)
+
+            csv = [x for x in os.scandir(path) if x.name.endswith('.csv')]
+            if len(csv) == 0:
+                print(f"Warning: {path}: no selected tags .csv file, skipped")
+                continue
+
+            def tag_select_csvs_up_front(k):
+                k = k.name.lower()
+                return -1 if "tag" in k or "select" in k else 1
+
+            csv.sort(key=tag_select_csvs_up_front)
+            tags_path = Path(path, csv[0])
+
+            if path.name not in cls.entries:
+                if path.name == 'wd-v1-4-convnextv2-tagger-v2':
+                    cls.entries[path.name] = WaifuDiffusionInterrogator(
+                        path.name,
+                        repo_id='SmilingWolf/SW-CV-ModelZoo'
+                    )
+                elif path.name == 'Z3D-E621-Convnext':
+                    cls.entries[path.name] = WaifuDiffusionInterrogator(
+                        'Z3D-E621-Convnext')
+                else:
+                    raise NotImplementedError(f"Add {path.name} resolution "
+                                              "similar to above here")
+
+            cls.entries[path.name].local_model = str(local_path)
+            cls.entries[path.name].local_tags = str(tags_path)
+
+        return sorted(i.name for i in cls.entries.values())
+
     @staticmethod
     def load_image(path: str) -> Image:
         try:
@@ -110,6 +204,9 @@ class Interrogator:
         self.tags = None
         # run_mode 0 is dry run, 1 means run (alternating), 2 means disabled
         self.run_mode = 0 if hasattr(self, "large_batch_interrogate") else 2
+        # default path if not overridden by download
+        self.local_model = None
+        self.local_tags = None
 
     def load(self) -> bool:
         raise NotImplementedError()
@@ -342,59 +439,96 @@ class HFInterrogator(Interrogator):
     def __init__(
         self,
         name: str,
-        repo_id: str,
         model_path: str,
         tags_path: str,
+        **kwargs,
     ) -> None:
         super().__init__(name)
-        self.repo_id = repo_id
         self.model_path = model_path
         self.tags_path = tags_path
         self.model = None
-        self.local_model = None
-        self.local_tags = None
         # tagger_hf_hub_down_opts contains args to hf_hub_download(). Parse
         # and pass only the supported args.
+
+        self.repo_specs = {'repo_id', 'revision', 'library_name',
+                           'library_version'}
+        self.hf_params = {}
+        for k in self.repo_specs:
+            if k in kwargs:
+                self.hf_params[k] = kwargs[k]
+
+        if 'repo_id' not in self.hf_params:
+            print(f"Error: interrogatos.json: HuggingFace model {self.name} "
+                  "lacks a repo_id. If not already local, download may fail.")
 
         attrs = getattr(shared.opts, 'tagger_hf_hub_down_opts',
                         f'cache_dir="{Its.hf_cache}"')
         attrs = [attr.split('=') for attr in map(str.strip, attrs.split(','))]
 
         signature = inspect.signature(hf_hub_download)
-        self.params = {}
         for arg, val in attrs:
-            if arg in signature.parameters:
+            if arg == 'filename' or arg in self.repo_specs:
+
+                print(f"Settings -> Tagger -> HuggingFace parameters: {arg}: "
+                      "Specific options need to go in the interrogators.json.")
+
+            elif arg in signature.parameters:
                 try:
                     tp = signature.parameters[arg].annotation(val)
-                    self.params[arg] = tp(val)
+                    self.hf_params[arg] = tp(val)
+
                 except TypeError:
+                    # unions, used for str or PathLike and a few.
                     if val == 'None':
-                        self.params[arg] = None
+                        self.hf_params[arg] = None
                     elif arg == 'token' and val in {'True', 'False'}:
-                        self.params[arg] = val == 'True'
+                        self.hf_params[arg] = val == 'True'
                     else:
-                        # unions, used for str or PathLike
                         if val[0] == val[-1] and val[0] in "'\"":
                             val = val[1:-1]
-                        self.params[arg] = str(val)
+                        self.hf_params[arg] = str(val)
             else:
                 print(f"Settings -> Tagger -> HuggingFace parameters: {arg}: "
                       "Invalid for hf_hub_download() => ignored.")
 
     def download(self) -> Tuple[str, str]:
-        print(f"Loading {self.name} model file from {self.repo_id}")
-        self.params['repo_id'] = self.repo_id
+        repo_id = self.hf_params.get('repo_id', '(?)')
+        print(f"Loading {self.name} model file from {repo_id}")
 
         paths = [self.local_model, self.local_tags]
 
-        try:
-            for i, filename in enumerate([self.model_path,  self.tags_path]):
-                self.params['filename'] = filename
-                paths[i] = hf_hub_download(**self.params)
-        except Exception as err:
-            if str(err)[:25] != "Offline mode is enabled.":
-                print(f"hf_hub_download({self.params}: {err}")
+        data = {}
+        for k in self.repo_specs:
+            if k in self.hf_params:
+                data[k] = self.hf_params[k]
 
+        # check if the model is up to date
+        info_path = Path(self.local_model).with_suffix('.info')
+        if info_path.exists():
+
+            if all(os.path.exists(p) for p in paths):
+                with open(info_path, 'r') as filen:
+                    try:
+                        old_data = json.load(filen)
+                        if old_data == data:
+                            print(f"Model {self.name} is up to date.")
+                            return paths
+                    except json.decoder.JSONDecodeError:
+                        pass
+
+            try:
+                for i, filen in enumerate([self.model_path, self.tags_path]):
+                    self.hf_params['filename'] = filen
+                    paths[i] = hf_hub_download(**self.hf_params)
+            except Exception as err:
+                if str(err)[:25] != "Offline mode is enabled.":
+                    print(f"hf_hub_download({self.hf_params}: {err}")
+                return paths
+
+        # write the repo_specs to a json alongside the model so we can
+        # check if the model is up to date
+        with open(info_path, 'w') as filen:
+            json.dump(data, filen)
         return paths
 
     def load_model(self, model_path) -> None:
@@ -411,9 +545,9 @@ class WaifuDiffusionInterrogator(HFInterrogator):
         name: str,
         model_path='model.onnx',
         tags_path='selected_tags.csv',
-        repo_id=None,
+        **kwargs,
     ) -> None:
-        super().__init__(name, repo_id, model_path, tags_path)
+        super().__init__(name, model_path, tags_path, **kwargs)
         self.tags = None
 
     def update_model_json(self, model_path, tags_path):
@@ -614,11 +748,11 @@ class MLDanbooruInterrogator(HFInterrogator):
     def __init__(
         self,
         name: str,
-        repo_id: str,
         model_path: str,
         tags_path='classes.json',
+        **kwargs
     ) -> None:
-        super().__init__(name, repo_id, model_path, tags_path)
+        super().__init__(name, model_path, tags_path, **kwargs)
         self.tags = None
 
     def load(self) -> bool:
@@ -631,6 +765,8 @@ class MLDanbooruInterrogator(HFInterrogator):
         if not os.path.exists(tags_path):
             print(f'Tags path {tags_path} not found.')
             return False
+
+        self.load_model(model_path)
 
         with open(tags_path, 'r', encoding='utf-8') as filen:
             self.tags = json.load(filen)

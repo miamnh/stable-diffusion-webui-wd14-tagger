@@ -11,9 +11,9 @@ from modules import ui  # pylint: disable=import-error
 from modules import generation_parameters_copypaste as parameters_copypaste  # pylint: disable=import-error # noqa
 
 from webui import wrap_gradio_gpu_call  # pylint: disable=import-error
-from tagger import utils  # pylint: disable=import-error
 from tagger.interrogator import Interrogator as It  # pylint: disable=E0401
 from tagger.uiset import IOData, QData  # pylint: disable=import-error
+from tagger.preset import preset
 
 TAG_INPUTS = ["add", "keep", "exclude", "search", "replace"]
 COMMON_OUTPUT = Tuple[
@@ -30,7 +30,7 @@ def unload_interrogators() -> List[str]:
     unloaded_models = 0
     remaining_models = ''
 
-    for i in utils.interrogators.values():
+    for i in It.entries.values():
         if i.unload():
             unloaded_models = unloaded_models + 1
         elif i.model is not None:
@@ -64,7 +64,7 @@ def on_interrogate(
             getattr(QData, "update_" + part)(val)
             It.input[part] = val
 
-    interrogator: It = next((i for i in utils.interrogators.values() if
+    interrogator: It = next((i for i in It.entries.values() if
                              i.name == name), None)
     if interrogator is None:
         return None, None, None, None, None, f"'{name}': invalid interrogator"
@@ -81,8 +81,9 @@ def on_interrogate_image(*args) -> COMMON_OUTPUT:
     # hack brcause image interrogaion occurs twice
     It.odd_increment = It.odd_increment + 1
     if It.odd_increment & 1 == 1:
-       return (None, None, None, None, None, '')
+        return (None, None, None, None, None, '')
     return on_interrogate_image_submit(*args)
+
 
 def on_interrogate_image_submit(
     image: Image, name: str, filt: str, *args
@@ -95,7 +96,7 @@ def on_interrogate_image_submit(
 
     if image is None:
         return None, None, None, None, None, 'No image selected'
-    interrogator: It = next((i for i in utils.interrogators.values() if
+    interrogator: It = next((i for i in It.entries.values() if
                              i.name == name), None)
     if interrogator is None:
         return None, None, None, None, None, f"'{name}': invalid interrogator"
@@ -179,13 +180,13 @@ def on_ui_tabs():
                         )
 
                     with gr.TabItem(label='Batch from directory'):
-                        input_glob = utils.preset.component(
+                        input_glob = preset.component(
                             gr.Textbox,
                             value='',
                             label='Input directory - See also settings tab.',
                             placeholder='/path/to/images or to/images/**/*'
                         )
-                        output_dir = utils.preset.component(
+                        output_dir = preset.component(
                             gr.Textbox,
                             value=It.input["output_dir"],
                             label='Output directory',
@@ -199,7 +200,7 @@ def on_ui_tabs():
                         )
                         with gr.Row(variant='compact'):
                             with gr.Column(variant='panel'):
-                                large_query = utils.preset.component(
+                                large_query = preset.component(
                                     gr.Checkbox,
                                     label='huge batch query (TF 2.10, '
                                     'experimental)',
@@ -208,7 +209,7 @@ def on_ui_tabs():
                                     version.parse('2.10')
                                 )
                             with gr.Column(variant='panel'):
-                                save_tags = utils.preset.component(
+                                save_tags = preset.component(
                                     gr.Checkbox,
                                     label='Save to tags files',
                                     value=True
@@ -222,7 +223,7 @@ def on_ui_tabs():
 
                 # preset selector
                 with gr.Row(variant='compact'):
-                    available_presets = utils.preset.list()
+                    available_presets = preset.list()
                     selected_preset = gr.Dropdown(
                         label='Preset',
                         choices=available_presets,
@@ -236,19 +237,15 @@ def on_ui_tabs():
                     ui.create_refresh_button(
                         selected_preset,
                         lambda: None,
-                        lambda: {'choices': utils.preset.list()},
+                        lambda: {'choices': preset.list()},
                         'refresh_preset'
                     )
 
                 # interrogator selector
                 with gr.Column():
                     with gr.Row(variant='compact'):
-                        def refresh():
-                            utils.refresh_interrogators()
-                            return sorted(x.name for x in utils.interrogators
-                                                               .values())
-                        interrogator_names = refresh()
-                        interrogator = utils.preset.component(
+                        interrogator_names = It.refresh()
+                        interrogator = preset.component(
                             gr.Dropdown,
                             label='Interrogator',
                             choices=interrogator_names,
@@ -262,44 +259,44 @@ def on_ui_tabs():
                         ui.create_refresh_button(
                             interrogator,
                             lambda: None,
-                            lambda: {'choices': refresh()},
+                            lambda: {'choices': It.refresh()},
                             'refresh_interrogator'
                         )
 
                     unload_all_models = gr.Button(
                         value='Unload all interrogate models'
                     )
-                tag_input["add"] = utils.preset.component(
+                tag_input["add"] = preset.component(
                     gr.Textbox,
                     label='Additional tags (comma split)',
                     elem_id='additional-tags'
                 )
                 with gr.Row(variant='compact'):
                     with gr.Column(variant='compact'):
-                        threshold = utils.preset.component(
+                        threshold = preset.component(
                             gr.Slider,
                             label='Weight threshold',
                             minimum=0,
                             maximum=1,
                             value=QData.threshold
                         )
-                        cumulative = utils.preset.component(
+                        cumulative = preset.component(
                             gr.Checkbox,
                             label='Combine interrogations',
                             value=False
                         )
-                        tag_input["search"] = utils.preset.component(
+                        tag_input["search"] = preset.component(
                             gr.Textbox,
                             label='Search tag, .. ->',
                             elem_id='search-tags'
                         )
-                        tag_input["keep"] = utils.preset.component(
+                        tag_input["keep"] = preset.component(
                             gr.Textbox,
                             label='Kept tag, ..',
                             elem_id='keep-tags'
                         )
                     with gr.Column(variant='compact'):
-                        tag_frac_threshold = utils.preset.component(
+                        tag_frac_threshold = preset.component(
                             gr.Slider,
                             label='Min tag fraction in batch and '
                                   'interrogations',
@@ -307,17 +304,17 @@ def on_ui_tabs():
                             maximum=1,
                             value=QData.tag_frac_threshold,
                         )
-                        unload_after = utils.preset.component(
+                        unload_after = preset.component(
                             gr.Checkbox,
                             label='Unload model after running',
                             value=False
                         )
-                        tag_input["replace"] = utils.preset.component(
+                        tag_input["replace"] = preset.component(
                             gr.Textbox,
                             label='-> Replace tag, ..',
                             elem_id='replace-tags'
                         )
-                        tag_input["exclude"] = utils.preset.component(
+                        tag_input["exclude"] = preset.component(
                             gr.Textbox,
                             label='Exclude tag, ..',
                             elem_id='exclude-tags'
@@ -336,7 +333,7 @@ def on_ui_tabs():
                             variant='secondary'
                         )
                     with gr.Column(variant='compact'):
-                        tag_search_selection = utils.preset.component(
+                        tag_search_selection = preset.component(
                             gr.Textbox,
                             label='Multi string search: part1, part2.. '
                                   '(Enter key to update)',
@@ -396,11 +393,11 @@ def on_ui_tabs():
         save_tags.input(fn=IOData.flip_save_tags(), inputs=[], outputs=[])
 
         # Preset and unload buttons
-        selected_preset.change(fn=utils.preset.apply, inputs=[selected_preset],
-                               outputs=[*utils.preset.components, info])
+        selected_preset.change(fn=preset.apply, inputs=[selected_preset],
+                               outputs=[*preset.components, info])
 
-        save_preset_button.click(fn=utils.preset.save, inputs=[selected_preset,
-                                 *utils.preset.components], outputs=[info])
+        save_preset_button.click(fn=preset.save, inputs=[selected_preset,
+                                 *preset.components], outputs=[info])
 
         unload_all_models.click(fn=unload_interrogators, outputs=[info])
 
@@ -451,11 +448,12 @@ def on_ui_tabs():
                        [tag_input[tag] for tag in TAG_INPUTS]
 
         # interrogation events
-        image_submit.click(fn=wrap_gradio_gpu_call(on_interrogate_image_submit),
-             inputs=[image] + common_input, outputs=common_output)
+        image_submit.click(
+            fn=wrap_gradio_gpu_call(on_interrogate_image_submit),
+            inputs=[image] + common_input, outputs=common_output)
 
         image.change(fn=wrap_gradio_gpu_call(on_interrogate_image),
-             inputs=[image] + common_input, outputs=common_output)
+                     inputs=[image] + common_input, outputs=common_output)
 
         batch_submit.click(fn=wrap_gradio_gpu_call(on_interrogate),
                            inputs=[input_glob, output_dir] + common_input,
