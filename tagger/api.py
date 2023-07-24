@@ -95,8 +95,9 @@ class Api:
 
         return models.TaggerInterrogateResponse(
             caption={
-                **data[3],
-                **output[2]
+                **output[0],
+                **output[1],
+                **output[2],
             })
 
     def endpoint_interrogators(self):
