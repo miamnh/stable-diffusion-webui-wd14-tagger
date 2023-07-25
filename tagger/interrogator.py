@@ -518,8 +518,7 @@ class HFInterrogator(Interrogator):
                     self.hf_params['filename'] = filen
                     paths[i] = hf_hub_download(**self.hf_params)
             except Exception as err:
-                if str(err)[:25] != "Offline mode is enabled.":
-                    print(f"hf_hub_download({self.hf_params}: {err}")
+                print(f"hf_hub_download({self.hf_params}: {err}")
                 return paths
 
         # write the repo_specs to a json alongside the model so we can
