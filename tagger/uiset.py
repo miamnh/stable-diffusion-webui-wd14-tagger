@@ -444,7 +444,7 @@ class QData:
                 except (ValidationError, IndexError) as err:
                     print(f'{msg}: {repr(err)}')
                     cls.err.add(msg)
-                    data = {"query": [], "tag": [], "rating": []}
+                    data = {"query": {}, "tag": [], "rating": []}
 
                 cls.index_shift = INDEX_SHIFT
                 cls.query = data["query"]

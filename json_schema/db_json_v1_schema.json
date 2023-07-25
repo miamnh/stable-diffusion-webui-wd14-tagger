@@ -26,7 +26,12 @@
                 "maximum": 16
               }
             }
-        }
+        },
+        "add": "string",
+        "exclude": "string",
+        "keep": "string",
+        "repl": "string",
+        "search": "string"
     },
     "required": ["rating", "tag", "query"],
     "additionalProperties": false,
