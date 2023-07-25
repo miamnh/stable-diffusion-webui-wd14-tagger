@@ -425,6 +425,7 @@ class QData:
                     ql = len(data["query"])
                     # convert v1 to v2, after TODO: keep only else branch
                     if "meta" not in data:
+                        cls.had_new = True  # <- force write for v1 -> v2
                         for key in ["tag", "rating"]:
                             for tag, lst in data[key].items():
                                 new_lst = []
