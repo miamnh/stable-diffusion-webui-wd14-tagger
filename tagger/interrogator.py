@@ -207,6 +207,7 @@ class Interrogator:
         # default path if not overridden by download
         self.local_model = None
         self.local_tags = None
+        # XXX don't Interrogator.refresh()-ception here
 
     def load(self) -> bool:
         raise NotImplementedError()
@@ -300,11 +301,7 @@ class Interrogator:
 
     def batch_interrogate(self) -> None:
         """ Interrogate all images in the input list """
-        QData.tags.clear()
-        QData.ratings.clear()
-        QData.image_dups.clear()
-        if not Interrogator.input["cumulative"]:
-            QData.in_db.clear()
+        QData.clear(Interrogator.input["cumulative"])
 
         if Interrogator.input["large_query"] is True and self.run_mode < 2:
             # TODO: write specified tags files instead of simple .txt

@@ -255,8 +255,8 @@ class QData:
     def clear(cls, mode: int) -> None:
         """ clear tags and ratings """
         cls.tags.clear()
-        cls.discarded_tags.clear()
         cls.ratings.clear()
+        cls.discarded_tags.clear()
         cls.for_tags_file.clear()
         if mode > 0:
             cls.in_db.clear()
