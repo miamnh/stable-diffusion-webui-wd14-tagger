@@ -8,6 +8,7 @@ from math import ceil
 from hashlib import sha256
 from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
 from json import dumps, loads, JSONDecodeError
+from jsonschema import validate, ValidationError
 from functools import partial
 from collections import defaultdict
 from PIL import Image
@@ -33,6 +34,7 @@ ItRetTP = Tuple[
     Dict[str, float],  # excluded tag confidences
     str,               # error message
 ]
+
 
 # If the interrogation weights truely have the precision, increase this
 # but it should probably stay below 16, or 32 if certified u64, somehow.
@@ -388,7 +390,11 @@ class QData:
         inverted and stored in the lower bits; masked, so with fixed precision.
         """
         bit_mask = ((1 << cls.index_shift) - 1)
-        return val >> cls.index_shift, 1.0 / float(val & bit_mask)
+        i = val >> cls.index_shift
+        qlen = len(cls.query)
+        if i >= qlen:
+            raise IndexError(f'Index {i}: out of bounds for query[{qlen}]')
+        return i, 1.0 / float(val & bit_mask)
 
     @classmethod
     def mux_i_wt(cls, i: int, weight: float) -> int:
@@ -398,7 +404,7 @@ class QData:
 
     @classmethod
     def read_json(cls, outdir) -> None:
-        """ read db.json if it exists """
+        """ read db.json if it exists, validate it, and update cls """
         cls.json_db = None
         if getattr(shared.opts, 'tagger_auto_serde_json', True):
             cls.json_db = outdir.joinpath('db.json')
@@ -407,58 +413,41 @@ class QData:
                 cls.had_new = False
                 msg = f'Error reading {cls.json_db}'
                 cls.err.discard(msg)
+                # validate json using either json_schema/db_jon_v1_schema.json
+                # or json_schema/db_jon_v2_schema.json
+
+                schema = Path(__file__).parent.parent.joinpath(
+                    'json_schema', 'db_json_v1_schema.json'
+                )
                 try:
                     data = loads(cls.json_db.read_text())
-                except JSONDecodeError as err:
-                    print(f'{msg}: {repr(err)}')
-                    cls.err.add(msg)
-                    return
-
-                for key in ["query", "tag", "rating"]:
-                    msg = f'{cls.json_db}: missing {key} key.'
-                    if key not in data:
-                        cls.err.add(msg)
-                    else:
-                        cls.err.discard(msg)
-                cls.query = data["query"]
-
-                # consistency checks; index against query length
-                try:
-                    tag_items = list(data["tag"].items())
-                    if len(tag_items) == 0:
-                        raise KeyError('no tags,')
-                    if "meta" in data:
-                        old = data["meta"]["index_shift"]
-                        if old != INDEX_SHIFT:
-                            # user changed INDEX_SHIFT, requery db
-                            raise KeyError(f'shifted: {old} => {INDEX_SHIFT}')
-                    # one-time db conversion for backwards compatibility
-                    # TODO: remove float -> int after a few months (keep else)
-                    if isinstance(list(list(tag_items[0])[1])[0], float):
+                    validate(data, loads(schema.read_text()))
+                    ql = len(data["query"])
+                    # convert v1 to v2, after TODO: keep only else branch
+                    if "meta" not in data:
                         for key in ["tag", "rating"]:
                             for tag, lst in data[key].items():
                                 new_lst = []
-                                for stored in lst:
-                                    i = ceil(stored) - 1
-                                    if i > len(cls.query):
-                                        raise KeyError(f'[{key}][{tag}] {i} >')
-                                    wt = stored - i
-                                    new_lst.append(cls.mux_i_wt(i, wt))
+                                for val in lst:
+                                    i = ceil(val) - 1
+                                    if i >= ql:
+                                        raise IndexError(f'{tag}:{i} > {ql}')
+                                    new_lst.append(cls.mux_i_wt(i, val - i))
                                 data[key][tag] = new_lst
                     else:
                         for key in ["tag", "rating"]:
                             for tag, lst in data[key].items():
-                                for stored in lst:
-                                    i = cls.get_i_wt(stored)[0]
-                                    if i > len(cls.query):
-                                        raise KeyError(f'[{key}][{tag}] {i} >')
-                except KeyError as err:
-                    print(f'{cls.json_db}: {err} len(query).')
-                    cls.query = {}
-                    data["tag"] = []
-                    data["rating"] = []
-                cls.index_shift = INDEX_SHIFT
+                                for val in lst:
+                                    val >>= cls.index_shift
+                                    if val >= ql:
+                                        raise IndexError(f'{tag}:{val} > {ql}')
+                except (ValidationError, IndexError) as err:
+                    print(f'{msg}: {repr(err)}')
+                    cls.err.add(msg)
+                    data = {"query": [], "tag": [], "rating": []}
 
+                cls.index_shift = INDEX_SHIFT
+                cls.query = data["query"]
                 cls.weighed = (
                     defaultdict(list, data["rating"]),
                     defaultdict(list, data["tag"])
@@ -474,6 +463,7 @@ class QData:
                 "rating": cls.weighed[0],
                 "tag": cls.weighed[1],
                 "query": cls.query,
+                "meta": {"index_shift": cls.index_shift}
             }
             cls.json_db.write_text(dumps(data, indent=2))
             print(f'Wrote {cls.json_db}: {len(cls.query)} interrogations, '
