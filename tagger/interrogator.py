@@ -471,7 +471,7 @@ class HFInterrogator(Interrogator):
 
             elif arg in signature.parameters:
                 try:
-                    tp = signature.parameters[arg].annotation(val)
+                    tp = signature.parameters[arg].annotation
                     self.hf_params[arg] = tp(val)
 
                 except TypeError:
