@@ -447,22 +447,27 @@ class HFInterrogator(Interrogator):
         # tagger_hf_hub_down_opts contains args to hf_hub_download(). Parse
         # and pass only the supported args.
 
+        signature = inspect.signature(hf_hub_download)
         self.repo_specs = {'repo_id', 'revision', 'library_name',
                            'library_version'}
         self.hf_params = {}
-        for k in self.repo_specs:
-            if k in kwargs:
-                self.hf_params[k] = kwargs[k]
+        for k in kwargs:
+            if k in signature.parameters:
+                tp = signature.parameters[k].annotation
+                if isinstance(kwargs[k], tp):
+                    self.hf_params[k] = kwargs[k]
+                    continue
+            print(f"Warning: interrogators.json: model {self.name}: "
+                  f"parameter {k} unsupported or or wrong type.")
 
         if 'repo_id' not in self.hf_params:
-            print(f"Error: interrogatos.json: HuggingFace model {self.name} "
+            print(f"Error: interrogators.json: HuggingFace model {self.name} "
                   "lacks a repo_id. If not already local, download may fail.")
 
         attrs = getattr(shared.opts, 'tagger_hf_hub_down_opts',
                         f'cache_dir="{Its.hf_cache}"')
         attrs = [attr.split('=') for attr in map(str.strip, attrs.split(','))]
 
-        signature = inspect.signature(hf_hub_download)
         for arg, val in attrs:
             if arg == 'filename' or arg in self.repo_specs:
 
