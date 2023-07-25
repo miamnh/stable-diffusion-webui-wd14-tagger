@@ -1,12 +1,12 @@
 {
     "type": "object",
     "properties": {
-        "rating": { "$ref": "#/$defs/weighted_label_v2" },
-        "tag": { "$ref": "#/$defs/weighted_label_v2" },
+        "rating": { "$ref": "#/$defs/weighted_label" },
+        "tag": { "$ref": "#/$defs/weighted_label" },
         "query": {
             "type": "object",
             "patternProperties": {
-                "[0-9a-f]{64}.*": {
+                "^[0-9a-f]{64}.*$": {
                     "type": "array",
                     "prefixItems": [
                         {"type": "string" },
@@ -31,7 +31,7 @@
     "required": ["rating", "tag", "query"],
     "additionalProperties": false,
     "$defs": {
-        "weighted_label_v2": {
+        "weighted_label": {
             "type": "object",
             "patternProperties": {
                 "^[^,]+$": {
