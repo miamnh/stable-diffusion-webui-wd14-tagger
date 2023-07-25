@@ -6,8 +6,6 @@ from typing import Tuple, List, Dict
 from pathlib import Path
 from gradio.context import Context
 from modules.images import sanitize_filename_part  # pylint: disable=E0401
-from modules.paths import extensions_dir
-from modules import scripts
 
 PresetDict = Dict[str, Dict[str, any]]
 
@@ -110,6 +108,4 @@ class Preset:
         return presets
 
 
-preset = Preset(Path(
-    os.path.join(extensions_dir, 'stable-diffusion-webui-wd14-tagger/presets')
-))
+preset = Preset(Path(__file__).parent.parent.joinpath('presets'))
