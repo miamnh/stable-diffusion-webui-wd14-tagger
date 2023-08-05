@@ -36,12 +36,6 @@ ItRetTP = Tuple[
 ]
 
 
-# If the interrogation weights truely have the precision, increase this
-# but it should probably stay below 16, or 32 if certified u64, somehow.
-# Note that you will have to re-interrogate all images if you change this.
-INDEX_SHIFT = 11
-
-
 class IOData:
     """ data class for input and output paths """
     last_path_mtimes = None
@@ -213,7 +207,6 @@ class QData:
     json_db = None
     weighed = (defaultdict(list), defaultdict(list))
     query = {}
-    index_shift = INDEX_SHIFT
 
     # representing the (cumulative) current interrogations
     ratings = defaultdict(float)
@@ -420,7 +413,6 @@ class QData:
                     cls.err.add(msg)
                     data = {"query": {}, "tag": [], "rating": []}
 
-                cls.index_shift = INDEX_SHIFT
                 cls.query = data["query"]
                 cls.weighed = (
                     defaultdict(list, data["rating"]),
@@ -437,7 +429,6 @@ class QData:
                 "rating": cls.weighed[0],
                 "tag": cls.weighed[1],
                 "query": cls.query,
-                "meta": {"index_shift": cls.index_shift}
             }
             cls.json_db.write_text(dumps(data, indent=2))
             print(f'Wrote {cls.json_db}: {len(cls.query)} interrogations, '
