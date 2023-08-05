@@ -4,7 +4,13 @@ import gradio as gr
 import re
 from PIL import Image
 from packaging import version
-from tensorflow import __version__ as tf_version
+
+try:
+    from tensorflow import __version__ as tf_version
+except ImportError:
+    def tf_version():
+        return '0.0.0'
+
 from html import escape as html_esc
 
 from modules import ui  # pylint: disable=import-error

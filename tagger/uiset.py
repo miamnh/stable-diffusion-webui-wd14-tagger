@@ -37,12 +37,6 @@ ItRetTP = Tuple[
 ]
 
 
-# If the interrogation weights truely have the precision, increase this
-# but it should probably stay below 16, or 32 if certified u64, somehow.
-# Note that you will have to re-interrogate all images if you change this.
-INDEX_SHIFT = 11
-
-
 class IOData:
     """ data class for input and output paths """
     last_path_mtimes = None
@@ -214,7 +208,6 @@ class QData:
     json_db = None
     weighed = (defaultdict(list), defaultdict(list))
     query = {}
-    index_shift = INDEX_SHIFT
 
     # representing the (cumulative) current interrogations
     ratings = defaultdict(float)
@@ -383,25 +376,14 @@ class QData:
             cls.err.discard(msg)
 
     @classmethod
-    def get_i_wt(cls, val: int) -> Tuple[int, float]:
+    def get_i_wt(cls, stored: int) -> Tuple[int, float]:
         """
         in db.json or QData.weighed, the weights & increment in the list are
         encoded. Each filestamp-interrogation corresponds to an incrementing
-        index. This index is stored in the upper bits while the weight is
-        inverted and stored in the lower bits; masked, so with fixed precision.
+        index. The index is above the floating point, the weight is below.
         """
-        bit_mask = ((1 << cls.index_shift) - 1)
-        i = val >> cls.index_shift
-        qlen = len(cls.query)
-        if i >= qlen:
-            raise IndexError(f'Index {i}: out of bounds for query[{qlen}]')
-        return i, 1.0 / float(val & bit_mask)
-
-    @classmethod
-    def mux_i_wt(cls, i: int, weight: float) -> int:
-        """ reverse of get_i_wt """
-        bit_mask = ((1 << cls.index_shift) - 1)
-        return (i << cls.index_shift) | (int(1.0 / weight) & bit_mask)
+        i = ceil(stored) - 1
+        return i, stored - i
 
     @classmethod
     def read_json(cls, outdir) -> None:
@@ -422,32 +404,15 @@ class QData:
                 try:
                     data = loads(cls.json_db.read_text())
                     validate(data, loads(schema.read_text()))
-                    ql = len(data["query"])
-                    # convert v1 to v2, after TODO: keep only else branch
-                    if "meta" not in data:
-                        cls.had_new = True  # <- force write for v1 -> v2
-                        for key in ["tag", "rating"]:
-                            for tag, lst in data[key].items():
-                                new_lst = []
-                                for val in lst:
-                                    i = ceil(val) - 1
-                                    if i >= ql:
-                                        raise IndexError(f'{tag}:{i} > {ql}')
-                                    new_lst.append(cls.mux_i_wt(i, val - i))
-                                data[key][tag] = new_lst
-                    else:
-                        for key in ["tag", "rating"]:
-                            for tag, lst in data[key].items():
-                                for val in lst:
-                                    val >>= cls.index_shift
-                                    if val >= ql:
-                                        raise IndexError(f'{tag}:{val} > {ql}')
+
+                    # convert v2 back to v1
+                    if "meta" in data:
+                        cls.had_new = True  # <- force write for v2 -> v1
                 except (ValidationError, IndexError) as err:
                     print(f'{msg}: {repr(err)}')
                     cls.err.add(msg)
                     data = {"query": {}, "tag": [], "rating": []}
 
-                cls.index_shift = INDEX_SHIFT
                 cls.query = data["query"]
                 cls.weighed = (
                     defaultdict(list, data["rating"]),
@@ -464,7 +429,6 @@ class QData:
                 "rating": cls.weighed[0],
                 "tag": cls.weighed[1],
                 "query": cls.query,
-                "meta": {"index_shift": cls.index_shift}
             }
             cls.json_db.write_text(dumps(data, indent=2))
             print(f'Wrote {cls.json_db}: {len(cls.query)} interrogations, '
@@ -492,6 +456,7 @@ class QData:
                 for i, val in map(cls.get_i_wt, lst):
                     if i == index:
                         data[j][ent] = val
+
         QData.in_db[index] = ('', '', '') + data
 
     @classmethod
@@ -531,7 +496,7 @@ class QData:
         # loop over ratings
         for rating, val in ratings:
             if fi_key != '':
-                cls.weighed[0][rating].append(cls.mux_i_wt(index, val))
+                cls.weighed[0][rating].append(val + index)
             cls.ratings[rating] += val
 
         count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
@@ -545,13 +510,14 @@ class QData:
                 continue
 
             if fi_key != '' and val >= 0.005:
-                cls.weighed[1][tag].append(cls.mux_i_wt(index, val))
+                cls.weighed[1][tag].append(val + index)
 
             if count < max_ct:
                 tag = cls.correct_tag(tag)
                 if tag not in cls.keep_tags:
                     if cls.is_excluded(tag) or val < cls.threshold:
-                        if tag not in cls.add_tags:
+                        if tag not in cls.add_tags and \
+                           len(cls.discarded_tags) < max_ct:
                             cls.discarded_tags[tag].append(val)
                         continue
                 if data[1] != '':

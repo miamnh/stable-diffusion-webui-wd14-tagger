@@ -256,7 +256,6 @@ class Interrogator:
             if Interrogator.input["unload_after"]:
                 self.unload()
 
-            QData.query[fi_key] = ('', len(QData.query))
             QData.apply_filters(data)
 
         for got in QData.in_db.values():
