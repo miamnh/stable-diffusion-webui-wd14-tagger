@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import io
 import json
+from jsonschema import validate, ValidationError
 import inspect
 from platform import uname
 from typing import Tuple, List, Dict, Callable
@@ -14,7 +15,7 @@ from huggingface_hub import hf_hub_download
 
 from modules.paths import extensions_dir
 from modules import shared
-from preload import default_ddp_path, default_onnx_path
+from preload import default_ddp_path, default_onnx_path, root_dir
 from tagger import settings  # pylint: disable=import-error
 from tagger.uiset import QData, IOData  # pylint: disable=import-error
 from . import dbimutils  # pylint: disable=import-error # noqa
@@ -97,29 +98,34 @@ class Interrogator:
     def refresh(cls) -> List[str]:
         """Refreshes the interrogator entries"""
         if len(cls.entries) == 0:
-            it_path = Path(os.path.join(
-                extensions_dir,
-                'stable-diffusion-webui-wd14-tagger/interrogators.json'
-            ))
+            it_path = root_dir.joinpath("interrogators.json")
             if not it_path.exists():
-                raise FileNotFoundError(f'{it_path} not found.')
+                it_path = root_dir.joinpath("default/interrogators.json")
+                if not it_path.exists():
+                    raise FileNotFoundError(f'{it_path} not found.')
 
-            with open(it_path) as filename:
-                raw = json.load(filename)
+                raw = json.loads(it_path)
+                schema = root_dir.joinpath('json_schema',
+                                           'interrogators_v1_schema.json')
+                validate(raw, json.loads(schema.read_text()))
 
-                for name, it in raw.items():
-                    if it["class"] == "DeepDanbooruInterrogator":
+                for class_name, it in raw.items():
+                    if class_name == "DeepDanbooruInterrogator":
                         It_type = DeepDanbooruInterrogator
-                    elif it["class"] == "WaifuDiffusionInterrogator":
+                    elif class_name == "WaifuDiffusionInterrogator":
                         It_type = WaifuDiffusionInterrogator
-                    elif it["class"] == "MLDanbooruInterrogator":
+                    elif class_name == "MLDanbooruInterrogator":
                         It_type = MLDanbooruInterrogator
                     else:
                         raise ValueError(f'Unimplemented: {it["class"]}')
+                    for name, obj in it.items():
+                        if name not in obj:
+                            obj[name] = name
+                        cls.entries[name] = It_type(**obj)
 
                     cls.entries[name] = It_type(**it["repo_specs"])
 
-    # load deepdanbooru project
+        # load deepdanbooru project
         ddp_path = getattr(shared.cmd_opts, 'deepdanbooru_projects_path',
                            default_ddp_path)
         onnx_path = getattr(shared.cmd_opts, 'onnxtagger_path',
@@ -138,6 +144,7 @@ class Interrogator:
                 continue
 
             cls.entries[path.name] = DeepDanbooruInterrogator(path.name, path)
+            # XXX: local_path is not set, bug.
         # scan for onnx models as well
         for path in os.scandir(onnx_path):
             print(f"Scanning {path} as onnx model")
@@ -180,6 +187,7 @@ class Interrogator:
                     raise NotImplementedError(f"Add {path.name} resolution "
                                               "similar to above here")
 
+            print(f"Found {path.name} onnx model {local_path} with tags ")
             cls.entries[path.name].local_model = str(local_path)
             cls.entries[path.name].local_tags = str(tags_path)
 
@@ -205,8 +213,8 @@ class Interrogator:
         # run_mode 0 is dry run, 1 means run (alternating), 2 means disabled
         self.run_mode = 0 if hasattr(self, "large_batch_interrogate") else 2
         # default path if not overridden by download
-        self.local_model = None
-        self.local_tags = None
+        self.local_model = ''
+        self.local_tags = ''
         # XXX don't Interrogator.refresh()-ception here
 
     def load(self) -> bool:
@@ -461,8 +469,8 @@ class HFInterrogator(Interrogator):
                   f"parameter {k} unsupported or or wrong type.")
 
         if 'repo_id' not in self.hf_params:
-            print(f"Error: interrogators.json: HuggingFace model {self.name} "
-                  "lacks a repo_id. If not already local, download may fail.")
+            print(f"Warning: interrogators.json: HuggingFace model {self.name}"
+                  " lacks a repo_id. If not already local, download may fail.")
 
         attrs = getattr(shared.opts, 'tagger_hf_hub_down_opts',
                         f'cache_dir="{Its.hf_cache}"')
@@ -496,7 +504,8 @@ class HFInterrogator(Interrogator):
     def download(self) -> Tuple[str, str]:
         repo_id = self.hf_params.get('repo_id', '(?)')
         print(f"Loading {self.name} model file from {repo_id}")
-
+        if self.local_model == '':
+            Interrogator.refresh()
         paths = [self.local_model, self.local_tags]
 
         data = {}

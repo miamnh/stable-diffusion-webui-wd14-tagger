@@ -4,6 +4,8 @@ from argparse import ArgumentParser
 
 from modules.shared import models_path  # pylint: disable=import-error
 
+root_dir = Path(__file__).parent.parent
+
 default_ddp_path = Path(models_path, 'deepdanbooru')
 default_onnx_path = Path(models_path, 'TaggerOnnx')
 

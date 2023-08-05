@@ -7,7 +7,7 @@ from glob import glob
 from math import ceil
 from hashlib import sha256
 from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
-from json import dumps, loads, JSONDecodeError
+from json import dumps, loads
 from jsonschema import validate, ValidationError
 from functools import partial
 from collections import defaultdict
@@ -17,6 +17,7 @@ from modules import shared  # pylint: disable=import-error
 from modules.deepbooru import re_special  # pylint: disable=import-error
 from tagger import format as tags_format  # pylint: disable=import-error
 from tagger import settings  # pylint: disable=import-error
+from preload import root_dir
 
 Its = settings.InterrogatorSettings
 
@@ -416,9 +417,8 @@ class QData:
                 # validate json using either json_schema/db_jon_v1_schema.json
                 # or json_schema/db_jon_v2_schema.json
 
-                schema = Path(__file__).parent.parent.joinpath(
-                    'json_schema', 'db_json_v1_schema.json'
-                )
+                schema = root_dir.joinpath('json_schema',
+                                           'db_json_v1_schema.json')
                 try:
                     data = loads(cls.json_db.read_text())
                     validate(data, loads(schema.read_text()))
