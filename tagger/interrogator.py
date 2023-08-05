@@ -151,9 +151,7 @@ class Interrogator:
             if Interrogator.input["unload_after"]:
                 self.unload()
 
-            # NB: order of queru key addition is important
             QData.apply_filters(data)
-            QData.query[fi_key] = ('', len(QData.query))
 
         for got in QData.in_db.values():
             QData.apply_filters(got)
