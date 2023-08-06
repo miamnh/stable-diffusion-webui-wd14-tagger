@@ -168,7 +168,7 @@ def on_ui_tabs():
     tag_input = {}
 
     with gr.Blocks(analytics_enabled=False) as tagger_interface:
-        with gr.Row().style(equal_height=False):
+        with gr.Row(equal_height=False):
             with gr.Column(variant='panel'):
 
                 # input components
@@ -383,7 +383,6 @@ def on_ui_tabs():
                         gallery = gr.Gallery(
                             label='Gallery',
                             elem_id='gallery',
-                        ).style(
                             columns=[2],
                             rows=[8],
                             object_fit="contain",
