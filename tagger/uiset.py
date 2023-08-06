@@ -474,10 +474,11 @@ class QData:
         if getattr(shared.opts, 'tagger_escape', False):
             tag = re_special.sub(r'\\\1', tag)  # tag_escape_pattern
 
-        for i, regex in cls.search_tags.items():
-            if re_match(regex, tag):
-                tag = re_sub(regex, cls.replace_tags[i], tag)
-                break
+        if len(cls.search_tags) == len(cls.replace_tags):
+            for i, regex in cls.search_tags.items():
+                if re_match(regex, tag):
+                    tag = re_sub(regex, cls.replace_tags[i], tag)
+                    break
 
         return tag
 
