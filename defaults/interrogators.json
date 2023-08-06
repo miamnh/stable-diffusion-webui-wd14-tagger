@@ -45,12 +45,12 @@
     "deepdanbooru-v3-20211112-sgd-e28": {
       "name": "DeepDanbooru v3 20211112 sgd e28",
       "repo_id": "KichangKim/DeepDanbooru",
-      "zip": "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20211112-sgd-e28/deepdanbooru-v3-20211112-sgd-e28.zip"
+      "filename": "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20211112-sgd-e28/deepdanbooru-v3-20211112-sgd-e28.zip"
     },
     "deepdanbooru-v4-20200814-sgd-e30": {
       "name": "DeepDanbooru v4 20200814 sgd e30",
       "repo_id": "KichangKim/DeepDanbooru",
-      "zip": "https://github.com/KichangKim/DeepDanbooru/releases/download/v4-20200814-sgd-e30/deepdanbooru-v4-20200814-sgd-e30.zip"
+      "filename": "https://github.com/KichangKim/DeepDanbooru/releases/download/v4-20200814-sgd-e30/deepdanbooru-v4-20200814-sgd-e30.zip"
   },
   "MLDanbooruInterrogator": {
     "mld-caformer.dec-5-97527" : {

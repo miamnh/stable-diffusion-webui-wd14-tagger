@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import io
 import json
-from jsonschema import validate, ValidationError
+from jsonschema import validate
 import inspect
 from platform import uname
 from typing import Tuple, List, Dict, Callable
@@ -13,7 +13,6 @@ from numpy import asarray, float32, expand_dims, exp
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 
-from modules.paths import extensions_dir
 from modules import shared
 from preload import default_ddp_path, default_onnx_path, root_dir
 from tagger import settings  # pylint: disable=import-error
