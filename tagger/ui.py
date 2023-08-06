@@ -301,7 +301,7 @@ def on_ui_tabs():
                         )
                         tag_input["keep"] = utils.preset.component(
                             gr.Textbox,
-                            label='Kept tag, ..',
+                            label='Keep tag, ..',
                             elem_id='keep-tags'
                         )
                     with gr.Column(variant='compact'):
