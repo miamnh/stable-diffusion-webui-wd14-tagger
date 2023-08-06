@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import io
 import json
-from jsonschema import validate, ValidationError
+from jsonschema import validate
 import inspect
 from re import match as re_match
 from jsonschema import validate
