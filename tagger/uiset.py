@@ -226,24 +226,6 @@ class QData:
         return setter
 
     @classmethod
-    def set_attr(cls, current: str, tag: str) -> None:
-        """ set attribute for current tag """
-        attr = getattr(cls, current + '_tags')
-        if current in ['add', 'replace']:
-            attr.append(tag)
-        elif current == 'keep':
-            attr.add(tag)
-        else:
-            rex = cls.compile_rex(tag)
-            if rex:
-                if current == 'exclude':
-                    attr.append(rex)
-                elif current == 'search':
-                    attr[len(attr)] = rex
-            else:
-                cls.err.add(f'empty regex in {current} tags')
-
-    @classmethod
     def clear(cls, mode: int) -> None:
         """ clear tags and ratings """
         cls.tags.clear()
@@ -291,7 +273,21 @@ class QData:
                 if tag in attr:
                     cls.err.add(msg)
                     return
-        cls.set_attr(current, tag)
+
+        attr = getattr(cls, current + '_tags')
+        if current in ['add', 'replace']:
+            attr.append(tag)
+        elif current == 'keep':
+            attr.add(tag)
+        else:
+            rex = cls.compile_rex(tag)
+            if rex:
+                if current == 'exclude':
+                    attr.append(rex)
+                elif current == 'search':
+                    attr[len(attr)] = rex
+            else:
+                cls.err.add(f'empty regex in {current} tags')
 
     @classmethod
     def update_keep(cls, keep: str) -> None:
