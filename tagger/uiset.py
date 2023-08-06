@@ -521,11 +521,11 @@ class QData:
                     current = cls.for_tags_file[data[1]].get(tag, 0.0)
                     cls.for_tags_file[data[1]][tag] = min(val + current, 1.0)
                 count += 1
+                if tag not in cls.add_tags:
+                    # those are already added
+                    cls.tags[tag].append(val)
             elif fi_key == '':
                 break
-            if tag not in cls.add_tags:
-                # those are already added
-                cls.tags[tag].append(val)
 
         if getattr(shared.opts, 'tagger_verbose', True):
             print(f'{data[0]}: {count}/{len(tags)} tags kept')
