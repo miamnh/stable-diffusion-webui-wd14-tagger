@@ -292,11 +292,8 @@ class QData:
     @classmethod
     def update_keep(cls, keep: str) -> None:
         cls.keep_tags = set()
-        msg = 'Empty tag in keep tags'
         if keep == '':
-            cls.err.add(msg)
             return
-        cls.err.discard(msg)
         un_re = re_comp(r' keep(?: and \w+)? tags')
         cls.err = {err for err in cls.err if not un_re.search(err)}
         for tag in map(str.strip, keep.split(',')):
