@@ -226,28 +226,28 @@ def on_ui_tabs():
                     elem_classes=['info']
                 )
 
-                # preset selector
-                with gr.Row(variant='compact'):
-                    available_presets = utils.preset.list()
-                    selected_preset = gr.Dropdown(
-                        label='Preset',
-                        choices=available_presets,
-                        value=available_presets[0]
-                    )
-
-                    save_preset_button = gr.Button(
-                        value=ui.save_style_symbol
-                    )
-
-                    ui.create_refresh_button(
-                        selected_preset,
-                        lambda: None,
-                        lambda: {'choices': utils.preset.list()},
-                        'refresh_preset'
-                    )
-
                 # interrogator selector
                 with gr.Column():
+                    # preset selector
+                    with gr.Row(variant='compact'):
+                        available_presets = utils.preset.list()
+                        selected_preset = gr.Dropdown(
+                            label='Preset',
+                            choices=available_presets,
+                            value=available_presets[0]
+                        )
+
+                        save_preset_button = gr.Button(
+                            value=ui.save_style_symbol
+                        )
+
+                        ui.create_refresh_button(
+                            selected_preset,
+                            lambda: None,
+                            lambda: {'choices': utils.preset.list()},
+                            'refresh_preset'
+                        )
+
                     with gr.Row(variant='compact'):
                         def refresh():
                             utils.refresh_interrogators()
@@ -275,13 +275,13 @@ def on_ui_tabs():
                     unload_all_models = gr.Button(
                         value='Unload all interrogate models'
                     )
-                tag_input["add"] = utils.preset.component(
-                    gr.Textbox,
-                    label='Additional tags (comma split)',
-                    elem_id='additional-tags'
-                )
-                with gr.Row(variant='compact'):
-                    with gr.Column(variant='compact'):
+                    with gr.Row(variant='compact'):
+                        tag_input["add"] = utils.preset.component(
+                            gr.Textbox,
+                            label='Additional tags (comma split)',
+                            elem_id='additional-tags'
+                        )
+                    with gr.Row(variant='compact'):
                         threshold = utils.preset.component(
                             gr.Slider,
                             label='Weight threshold',
@@ -289,22 +289,6 @@ def on_ui_tabs():
                             maximum=1,
                             value=QData.threshold
                         )
-                        cumulative = utils.preset.component(
-                            gr.Checkbox,
-                            label='Combine interrogations',
-                            value=False
-                        )
-                        tag_input["search"] = utils.preset.component(
-                            gr.Textbox,
-                            label='Search tag, .. ->',
-                            elem_id='search-tags'
-                        )
-                        tag_input["keep"] = utils.preset.component(
-                            gr.Textbox,
-                            label='Keep tag, ..',
-                            elem_id='keep-tags'
-                        )
-                    with gr.Column(variant='compact'):
                         tag_frac_threshold = utils.preset.component(
                             gr.Slider,
                             label='Min tag fraction in batch and '
@@ -313,15 +297,33 @@ def on_ui_tabs():
                             maximum=1,
                             value=QData.tag_frac_threshold,
                         )
+                    with gr.Row(variant='compact'):
+                        cumulative = utils.preset.component(
+                            gr.Checkbox,
+                            label='Combine interrogations',
+                            value=False
+                        )
                         unload_after = utils.preset.component(
                             gr.Checkbox,
                             label='Unload model after running',
                             value=False
                         )
+                    with gr.Row(variant='compact'):
+                        tag_input["search"] = utils.preset.component(
+                            gr.Textbox,
+                            label='Search tag, .. ->',
+                            elem_id='search-tags'
+                        )
                         tag_input["replace"] = utils.preset.component(
                             gr.Textbox,
                             label='-> Replace tag, ..',
                             elem_id='replace-tags'
+                        )
+                    with gr.Row(variant='compact'):
+                        tag_input["keep"] = utils.preset.component(
+                            gr.Textbox,
+                            label='Keep tag, ..',
+                            elem_id='keep-tags'
                         )
                         tag_input["exclude"] = utils.preset.component(
                             gr.Textbox,
