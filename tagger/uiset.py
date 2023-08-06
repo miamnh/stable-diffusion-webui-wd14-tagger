@@ -580,9 +580,9 @@ class QData:
 
         ratings, tags, discarded_tags = {}, {}, {}
 
-        for val in cls.for_tags_file.values():
+        for n in cls.for_tags_file.keys():
             for k in cls.add_tags:
-                val[k] = 1.0 * count
+                cls.for_tags_file[n][k] = 1.0 * count
 
         for k in cls.add_tags:
             tags[k] = 1.0
@@ -598,10 +598,10 @@ class QData:
                 # replace if k interferes with html code
             else:
                 discarded_tags[k] = sum(lst) / count
-                for remaining_tags in cls.for_tags_file.values():
-                    if k in remaining_tags:
+                for n in cls.for_tags_file.keys():
+                    if k in cls.for_tags_file[n]:
                         if k not in cls.add_tags and k not in cls.keep_tags:
-                            del remaining_tags[k]
+                            del cls.for_tags_file[n][k]
 
         for k, lst in cls.discarded_tags.items():
             fraction_of_queries = len(lst) / count
