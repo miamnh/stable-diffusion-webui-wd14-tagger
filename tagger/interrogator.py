@@ -76,7 +76,7 @@ class Interrogator:
             # write errors in html pointer list, every error in a <li> tag
             errors = IOData.error_msg()
         if len(QData.err) > 0:
-            errors += 'Fix to write correct output:<br><ul><li>' + \
+            errors += 'Possible issues:<br><ul><li>' + \
                       '</li><li>'.join(QData.err) + '</li></ul>'
         return errors
 
