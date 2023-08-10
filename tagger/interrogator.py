@@ -120,10 +120,12 @@ class Interrogator:
                     cls.entries[name] = It_type(**it["repo_specs"])
 
     # load deepdanbooru project
-        ddp_path = getattr(shared.cmd_opts, 'deepdanbooru_projects_path',
-                           default_ddp_path)
-        onnx_path = getattr(shared.cmd_opts, 'onnxtagger_path',
-                            default_onnx_path)
+        ddp_path = shared.cmd_opts.deepdanbooru_projects_path
+        if ddp_path is None:
+            ddp_path = Path(shared.models_path, 'deepdanbooru')
+        onnx_path = shared.cmd_opts.onnx_path
+        if onnx_path is None:
+            onnx_path = Path(shared.models_path, 'TaggerOnnx')
         os.makedirs(ddp_path, exist_ok=True)
         os.makedirs(onnx_path, exist_ok=True)
 
