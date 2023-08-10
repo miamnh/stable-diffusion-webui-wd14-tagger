@@ -16,7 +16,10 @@ from html import escape as html_esc
 from modules import ui  # pylint: disable=import-error
 from modules import generation_parameters_copypaste as parameters_copypaste  # pylint: disable=import-error # noqa
 
-from webui import wrap_gradio_gpu_call  # pylint: disable=import-error
+try:
+    from modules.call_queue import wrap_gradio_gpu_call
+except ImportError:
+    from webui import wrap_gradio_gpu_call  # pylint: disable=import-error
 from tagger import utils  # pylint: disable=import-error
 from tagger.interrogator import Interrogator as It  # pylint: disable=E0401
 from tagger.uiset import IOData, QData  # pylint: disable=import-error
