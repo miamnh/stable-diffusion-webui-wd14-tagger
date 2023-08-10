@@ -3,16 +3,18 @@ import os
 from pathlib import Path
 import io
 import json
+import inspect
+from re import match as re_match
 from platform import system, uname
 from typing import Tuple, List, Dict, Callable
 from pandas import read_csv
 from PIL import Image, UnidentifiedImageError
 from numpy import asarray, float32, expand_dims, exp
 from tqdm import tqdm
-
 from huggingface_hub import hf_hub_download
-from modules import shared  # pylint: disable=import-error
 
+from modules.paths import extensions_dir
+from modules import shared
 from tagger import settings  # pylint: disable=import-error
 from tagger.uiset import QData, IOData  # pylint: disable=import-error
 from . import dbimutils  # pylint: disable=import-error # noqa
@@ -27,21 +29,20 @@ use_cpu = ('all' in shared.cmd_opts.use_cpu) or (
 # https://github.com/toriato/stable-diffusion-webui-wd14-tagger/commit/e4ec460122cf674bbf984df30cdb10b4370c1224#r92654958
 onnxrt_providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
 
-if use_cpu:
-    #import gc
+if shared.cmd_opts.device_id is not None:
+    m = re_match(r'([cg])pu:\d+$', shared.cmd_opts.device_id)
+    if m is None:
+        raise ValueError('--device-id is not cpu:<nr> or gpu:<nr>')
+    if m.group(1) == 'c':
+        onnxrt_providers.pop(0)
+    TF_DEVICE_NAME = f'/{shared.cmd_opts.device_id}'
+elif use_cpu:
     TF_DEVICE_NAME = '/cpu:0'
     onnxrt_providers.pop(0)
-    print(f'== WD14 tagger: cpu, {uname()} ==')
 else:
-    #from numba import cuda
     TF_DEVICE_NAME = '/gpu:0'
-    print(f'== WD14 tagger gpu, {uname()} ==')
 
-    if shared.cmd_opts.device_id is not None:
-        try:
-            TF_DEVICE_NAME = f'/gpu:{int(shared.cmd_opts.device_id)}'
-        except ValueError:
-            print('--device-id is not an integer')
+print(f'== WD14 tagger {TF_DEVICE_NAME}, {uname()} ==')
 
 
 class Interrogator:

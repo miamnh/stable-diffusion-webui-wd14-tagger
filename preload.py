@@ -19,3 +19,8 @@ def preload(parser: ArgumentParser):
         type=str,
         help='Path to directory with Onnyx project(s).'
     )
+    parser.add_argument(
+        '--additional-device-ids',
+        type=str,
+        help='Extra device ID to use. cpu:0,gpu:1..',
+    )
