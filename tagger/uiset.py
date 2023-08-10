@@ -7,7 +7,7 @@ from glob import glob
 from math import ceil
 from hashlib import sha256
 from re import compile as re_comp, sub as re_sub, match as re_match, IGNORECASE
-from json import dumps, loads, JSONDecodeError
+from json import dumps, loads
 from jsonschema import validate, ValidationError
 from functools import partial
 from collections import defaultdict

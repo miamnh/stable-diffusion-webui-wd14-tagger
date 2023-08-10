@@ -170,7 +170,7 @@ def on_ui_tabs():
     tag_input = {}
 
     with gr.Blocks(analytics_enabled=False) as tagger_interface:
-        with gr.Row(equal_height=False):
+        with gr.Row():
             with gr.Column(variant='panel'):
 
                 # input components
