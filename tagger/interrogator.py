@@ -135,7 +135,7 @@ class Interrogator:
 
     def interrogate_image(self, image: Image) -> None:
         sha = IOData.get_bytes_hash(image.tobytes())
-        QData.clear(Interrogator.input["cumulative"])
+        QData.clear(1 - Interrogator.input["cumulative"])
 
         fi_key = sha + self.name
         count = 0
@@ -203,7 +203,7 @@ class Interrogator:
 
     def batch_interrogate(self) -> None:
         """ Interrogate all images in the input list """
-        QData.clear(Interrogator.input["cumulative"])
+        QData.clear(1 - Interrogator.input["cumulative"])
 
         if Interrogator.input["large_query"] is True and self.run_mode < 2:
             # TODO: write specified tags files instead of simple .txt
