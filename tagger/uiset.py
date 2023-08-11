@@ -1,6 +1,6 @@
 """ for handling ui settings """
 
-from typing import List, Dict, Tuple, Callable, Set, Optional
+from typing import List, Dict, Tuple, Callable, Set, Optional, Pattern
 import os
 from pathlib import Path
 from glob import glob
@@ -29,10 +29,10 @@ supported_extensions = {
 
 # interrogator return type
 ItRetTP = Tuple[
-    Dict[str, float],  # rating confidences
-    Dict[str, float],  # tag confidences
-    Dict[str, float],  # excluded tag confidences
-    str,               # error message
+    Optional[Dict[str, float]],  # rating confidences
+    Optional[Dict[str, float]],  # tag confidences
+    Optional[Dict[str, float]],  # excluded tag confidences
+    str,                         # error message
 ]
 
 
@@ -41,9 +41,12 @@ class IOData:
     last_path_mtimes = None
     base_dir = None
     output_root = None
-    paths = []
+    paths: List[Tuple[
+        Path, Optional[Path], Optional[Path], Optional[str]
+    ]] = []
     save_tags = True
-    err = set()
+    err: Set[str] = set()
+    base_dir_last = None
 
     @classmethod
     def error_msg(cls) -> str:
@@ -51,7 +54,7 @@ class IOData:
                "</ul>"
 
     @classmethod
-    def flip_save_tags(cls) -> callable:
+    def flip_save_tags(cls) -> Callable:
         def toggle():
             cls.save_tags = not cls.save_tags
         return toggle
@@ -65,7 +68,7 @@ class IOData:
         """ update output directory, and set input and output paths """
         pout = Path(output_dir)
         if pout != cls.output_root:
-            paths = [x[0] for x in cls.paths]
+            paths = [str(x[0]) for x in cls.paths]
             cls.paths = []
             cls.output_root = pout
             cls.set_batch_io(paths)
@@ -81,13 +84,13 @@ class IOData:
         """ get hashes of all files """
         ret = set()
         for entries in cls.paths:
-            if len(entries) == 4:
+            if entries[3] is not None:
                 ret.add(entries[3])
             else:
                 # if there is no checksum, calculate it
-                image = Image.open(entries[0])
+                image = Image.open(Path(entries[0]))
                 checksum = cls.get_bytes_hash(image.tobytes())
-                entries.append(checksum)
+                entries = (entries[0], entries[1], entries[2], checksum)
                 ret.add(checksum)
         return ret
 
@@ -113,7 +116,7 @@ class IOData:
             return
         cls.err.discard(msg)
 
-        recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
+        recursive = getattr(shared.opts, 'tagger_batch_recursive', True)
         path_mtimes = []
         for filename in glob(input_glob, recursive=recursive):
             ext = os.path.splitext(filename)[1].lower()
@@ -150,10 +153,10 @@ class IOData:
         """ set input and output paths for batch mode """
         checked_dirs = set()
         cls.paths = []
-        for path in paths:
-            path = Path(path)
+        for filename in paths:
+            path = Path(filename)
             if not cls.save_tags:
-                cls.paths.append([path, '', ''])
+                cls.paths.append((path, None, None, None))
                 continue
 
             # guess the output path
@@ -173,57 +176,61 @@ class IOData:
             except (TypeError, ValueError):
                 cls.err.add(msg)
 
+            if cls.output_root is None:
+                raise ValueError
             output_dir = cls.output_root.joinpath(
                 *path.parts[base_dir_last_idx + 1:]).parent
 
             tags_out = output_dir.joinpath(formatted_output_filename)
 
             if output_dir in checked_dirs:
-                cls.paths.append([path, tags_out, ''])
+                cls.paths.append((path, tags_out, None, None))
             else:
                 checked_dirs.add(output_dir)
                 if os.path.exists(output_dir):
                     msg = 'output_dir: not a directory.'
                     if os.path.isdir(output_dir):
-                        cls.paths.append([path, tags_out, ''])
+                        cls.paths.append((path, tags_out, None, None))
                         cls.err.discard(msg)
                     else:
                         cls.err.add(msg)
                 else:
-                    cls.paths.append([path, tags_out, output_dir])
+                    cls.paths.append((path, tags_out, output_dir, None))
 
 
 class QData:
     """ Query data: contains parameters for the query """
-    add_tags = []
-    keep_tags = set()
-    exclude_tags = []
-    search_tags = {}
-    replace_tags = []
+    add_tags: List[str] = []
+    keep_tags: Set[str] = set()
+    exclude_tags: List[str] = []
+    search_tags: Dict[int, Pattern[str]] = {}
+    replace_tags: List[str] = []
     threshold = 0.35
     tag_frac_threshold = 0.05
 
     # read from db.json, update with what should be written to db.json:
     json_db = None
-    weighed = (defaultdict(list), defaultdict(list))
-    query = {}
+    weighed: Tuple[
+        Dict[str, List[float]],
+        Dict[str, List[float]]
+    ] = (defaultdict(list), defaultdict(list))
+    query: Dict[str, Tuple[str, int]] = {}
 
     # representing the (cumulative) current interrogations
-    ratings = defaultdict(float)
-    tags = defaultdict(list)
-    discarded_tags = defaultdict(list)
-    in_db = {}
-    for_tags_file = defaultdict(lambda: defaultdict(float))
+    ratings: Dict[str, float] = defaultdict(float)
+    tags: Dict[str, List[float]] = defaultdict(list)
+    discarded_tags: Dict[str, List[float]] = defaultdict(list)
+    in_db: Dict[
+        int,
+        Tuple[str, str, str, Dict[str, float], Dict[str, float]]
+    ] = {}
+    for_tags_file: Dict[
+        str, Dict[str, float]
+    ] = defaultdict(lambda: defaultdict(float))
 
     had_new = False
-    err = set()
-    image_dups = defaultdict(set)
-
-    @classmethod
-    def set(cls, key: str) -> Callable[[str], Tuple[str]]:
-        def setter(val) -> Tuple[str]:
-            setattr(cls, key, val)
-        return setter
+    err: Set[str] = set()
+    image_dups: Dict[str, Set[str]] = defaultdict(set)
 
     @classmethod
     def clear(cls, mode: int) -> None:
@@ -315,7 +322,7 @@ class QData:
             shared.opts.tagger_count_threshold = len(cls.add_tags)
 
     @staticmethod
-    def compile_rex(rex: str) -> Optional:
+    def compile_rex(rex: str) -> Optional[Pattern[str]]:
         if rex in {'', '^', '$', '^$'}:
             return None
         if rex[0] == '^':
@@ -368,7 +375,7 @@ class QData:
             cls.err.discard(msg)
 
     @classmethod
-    def get_i_wt(cls, stored: int) -> Tuple[int, float]:
+    def get_i_wt(cls, stored: float) -> Tuple[int, float]:
         """
         in db.json or QData.weighed, the weights & increment in the list are
         encoded. Each filestamp-interrogation corresponds to an incrementing
@@ -442,8 +449,8 @@ class QData:
     @classmethod
     def single_data(cls, fi_key: str) -> None:
         """ get tags and ratings for filestamp-interrogator """
-        index = cls.query.get(fi_key)[1]
-        data = ({}, {})
+        index = cls.query[fi_key][1]
+        data: Tuple[Dict[str, float], Dict[str, float]] = ({}, {})
         for j in range(2):
             for ent, lst in cls.weighed[j].items():
                 for i, val in map(cls.get_i_wt, lst):
@@ -467,11 +474,11 @@ class QData:
         if getattr(shared.opts, 'tagger_escape', False):
             tag = re_special.sub(r'\\\1', tag)  # tag_escape_pattern
 
-        if len(cls.search_tags) == len(cls.replace_tags):
+        if len(cls.search_tags) != len(cls.replace_tags):
             for i, regex in cls.search_tags.items():
-                if re_match(regex, tag):
-                    tag = re_sub(regex, cls.replace_tags[i], tag)
-                    break
+                m = re_match(regex, tag)
+                if m:
+                    return re_sub(regex, cls.replace_tags[i], tag)
 
         return tag
 
@@ -612,10 +619,10 @@ class QData:
         for file, remaining_tags in cls.for_tags_file.items():
             sorted_tags = cls.sort_tags(remaining_tags)
             if weighted_tags_files:
-                sorted_tags = [f'({k}:{v})' for k, v in sorted_tags]
+                joinable = [f'({k}:{v})' for k, v in sorted_tags]
             else:
-                sorted_tags = [k for k, v in sorted_tags]
-            file.write_text(', '.join(sorted_tags), encoding='utf-8')
+                joinable = [k for k, v in sorted_tags]
+            Path(file).write_text(', '.join(joinable), encoding='utf-8')
 
         warn = ""
         if len(QData.err) > 0:
