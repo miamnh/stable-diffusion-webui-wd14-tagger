@@ -233,6 +233,12 @@ class QData:
     image_dups: Dict[str, Set[str]] = defaultdict(set)
 
     @classmethod
+    def set(cls, key: str) -> Callable[[str], Tuple[str]]:
+        def setter(val) -> Tuple[str]:
+            setattr(cls, key, val)
+        return setter
+
+    @classmethod
     def clear(cls, mode: int) -> None:
         """ clear tags and ratings """
         cls.tags.clear()
