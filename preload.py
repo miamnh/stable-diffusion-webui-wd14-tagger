@@ -2,6 +2,7 @@
 from pathlib import Path
 from argparse import ArgumentParser
 
+root_dir = Path(__file__).parent.parent
 
 def preload(parser: ArgumentParser):
     """ Preload module for DeepDanbooru or onnxtagger. """

@@ -3,8 +3,9 @@ import os
 from pathlib import Path
 import io
 import json
-import inspect
 from re import match as re_match
+from jsonschema import validate
+import inspect
 from platform import uname
 from typing import Tuple, List, Dict, Callable
 from pandas import read_csv
@@ -13,6 +14,7 @@ from numpy import asarray, float32, expand_dims, exp
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 
+from prload import root_dir
 from modules import shared
 from tagger import settings  # pylint: disable=import-error
 from tagger.uiset import QData, IOData  # pylint: disable=import-error
@@ -75,7 +77,7 @@ class Interrogator:
             # write errors in html pointer list, every error in a <li> tag
             errors = IOData.error_msg()
         if len(QData.err) > 0:
-            errors += 'Fix to write correct output:<br><ul><li>' + \
+            errors += 'Possible issues:<br><ul><li>' + \
                       '</li><li>'.join(QData.err) + '</li></ul>'
         return errors
 
@@ -97,25 +99,30 @@ class Interrogator:
     def refresh(cls) -> List[str]:
         """Refreshes the interrogator entries"""
         if len(cls.entries) == 0:
-            it_path = Path(os.path.join(
-                extensions_dir,
-                'stable-diffusion-webui-wd14-tagger/interrogators.json'
-            ))
+            it_path = root_dir.joinpath("interrogators.json")
             if not it_path.exists():
-                raise FileNotFoundError(f'{it_path} not found.')
+                it_path = root_dir.joinpath("default/interrogators.json")
+                if not it_path.exists():
+                    raise FileNotFoundError(f'{it_path} not found.')
 
-            with open(it_path) as filename:
-                raw = json.load(filename)
+                raw = json.loads(it_path)
+                schema = root_dir.joinpath('json_schema',
+                                           'interrogators_v1_schema.json')
+                validate(raw, json.loads(schema.read_text()))
 
-                for name, it in raw.items():
-                    if it["class"] == "DeepDanbooruInterrogator":
+                for class_name, it in raw.items():
+                    if class_name == "DeepDanbooruInterrogator":
                         It_type = DeepDanbooruInterrogator
-                    elif it["class"] == "WaifuDiffusionInterrogator":
+                    elif class_name == "WaifuDiffusionInterrogator":
                         It_type = WaifuDiffusionInterrogator
-                    elif it["class"] == "MLDanbooruInterrogator":
+                    elif class_name == "MLDanbooruInterrogator":
                         It_type = MLDanbooruInterrogator
                     else:
                         raise ValueError(f'Unimplemented: {it["class"]}')
+                    for name, obj in it.items():
+                        if name not in obj:
+                            obj[name] = name
+                        cls.entries[name] = It_type(**obj)
 
                     cls.entries[name] = It_type(**it["repo_specs"])
 
@@ -209,6 +216,7 @@ class Interrogator:
         # default path if not overridden by download
         self.local_model = None
         self.local_tags = None
+        # XXX don't Interrogator.refresh()-ception here
 
     def load(self) -> bool:
         raise NotImplementedError()
@@ -447,16 +455,22 @@ class HFInterrogator(Interrogator):
         # tagger_hf_hub_down_opts contains args to hf_hub_download(). Parse
         # and pass only the supported args.
 
+        signature = inspect.signature(hf_hub_download)
         self.repo_specs = {'repo_id', 'revision', 'library_name',
                            'library_version'}
         self.hf_params = {}
-        for k in self.repo_specs:
-            if k in kwargs:
-                self.hf_params[k] = kwargs[k]
+        for k in kwargs:
+            if k in signature.parameters:
+                tp = signature.parameters[k].annotation
+                if isinstance(kwargs[k], tp):
+                    self.hf_params[k] = kwargs[k]
+                    continue
+            print(f"Warning: interrogators.json: model {self.name}: "
+                  f"parameter {k} unsupported or or wrong type.")
 
         if 'repo_id' not in self.hf_params:
-            print(f"Error: interrogatos.json: HuggingFace model {self.name} "
-                  "lacks a repo_id. If not already local, download may fail.")
+            print(f"Warning: interrogators.json: HuggingFace model {self.name}"
+                  " lacks a repo_id. If not already local, download may fail.")
 
         attrs = getattr(shared.opts, 'tagger_hf_hub_down_opts',
                         f'cache_dir="{Its.hf_cache}"')
@@ -471,7 +485,7 @@ class HFInterrogator(Interrogator):
 
             elif arg in signature.parameters:
                 try:
-                    tp = signature.parameters[arg].annotation(val)
+                    tp = signature.parameters[arg].annotation
                     self.hf_params[arg] = tp(val)
 
                 except TypeError:
@@ -491,7 +505,8 @@ class HFInterrogator(Interrogator):
     def download(self) -> Tuple[str, str]:
         repo_id = self.hf_params.get('repo_id', '(?)')
         print(f"Loading {self.name} model file from {repo_id}")
-
+        if self.local_model == '':
+            Interrogator.refresh()
         paths = [self.local_model, self.local_tags]
 
         data = {}
@@ -518,8 +533,7 @@ class HFInterrogator(Interrogator):
                     self.hf_params['filename'] = filen
                     paths[i] = hf_hub_download(**self.hf_params)
             except Exception as err:
-                if str(err)[:25] != "Offline mode is enabled.":
-                    print(f"hf_hub_download({self.hf_params}: {err}")
+                print(f"hf_hub_download({self.hf_params}: {err}")
                 return paths
 
         # write the repo_specs to a json alongside the model so we can
