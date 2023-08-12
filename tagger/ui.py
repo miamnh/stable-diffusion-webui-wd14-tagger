@@ -1,5 +1,5 @@
 """ This module contains the ui for the tagger tab. """
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple, List
 import gradio as gr
 import re
 from PIL import Image
@@ -26,11 +26,11 @@ from tagger.preset import preset
 
 TAG_INPUTS = ["add", "keep", "exclude", "search", "replace"]
 COMMON_OUTPUT = Tuple[
-    Optional[str],               # tags as string
-    Optional[str],               # discarded tags as string
-    Optional[Dict[str, float]],  # rating confidences
-    Optional[Dict[str, float]],  # tag confidences
-    Optional[Dict[str, float]],  # excluded tag confidences
+    str,               # tags as string
+    str,               # discarded tags as string
+    Dict[str, float],  # rating confidences
+    Dict[str, float],  # tag confidences
+    Dict[str, float],  # excluded tag confidences
     str,               # error message
 ]
 
@@ -52,7 +52,7 @@ def unload_interrogators() -> List[str]:
                            "not be unloaded, a known issue."
     QData.clear(1)
 
-    return [f'{unloaded_models} model(s) unloaded{remaining_models}']
+    return (f'{unloaded_models} model(s) unloaded{remaining_models}',)
 
 
 def on_interrogate(
@@ -90,9 +90,8 @@ def on_interrogate_image(*args) -> COMMON_OUTPUT:
     # hack brcause image interrogaion occurs twice
     It.odd_increment = It.odd_increment + 1
     if It.odd_increment & 1 == 1:
-        return (None, None, None, None, None, '')
+       return (None, None, None, None, None, '')
     return on_interrogate_image_submit(*args)
-
 
 def on_interrogate_image_submit(
     image: Image, name: str, filt: str, *args
@@ -116,7 +115,7 @@ def on_interrogate_image_submit(
 
 def move_selection_to_input(
     filt: str, field: str
-) -> Tuple[Optional[str], Optional[str], str]:
+) -> Tuple[str, str, str]:
     """ moves the selected to the input field """
     if It.output is None:
         return (None, None, '')
@@ -139,15 +138,11 @@ def move_selection_to_input(
     return ('', data, info)
 
 
-def move_selection_to_keep(
-    tag_search_filter: str
-) -> Tuple[Optional[str], Optional[str], str]:
+def move_selection_to_keep(tag_search_filter: str) -> Tuple[str, str, str]:
     return move_selection_to_input(tag_search_filter, "keep")
 
 
-def move_selection_to_exclude(
-    tag_search_filter: str
-) -> Tuple[Optional[str], Optional[str], str]:
+def move_selection_to_exclude(tag_search_filter: str) -> Tuple[str, str, str]:
     return move_selection_to_input(tag_search_filter, "exclude")
 
 
@@ -462,13 +457,11 @@ def on_ui_tabs():
                        [tag_input[tag] for tag in TAG_INPUTS]
 
         # interrogation events
-        image_submit.click(
-            fn=wrap_gradio_gpu_call(on_interrogate_image_submit),
-            inputs=[image] + common_input, outputs=common_output)
+        image_submit.click(fn=wrap_gradio_gpu_call(on_interrogate_image_submit),
+             inputs=[image] + common_input, outputs=common_output)
 
-        image.change(
-            fn=wrap_gradio_gpu_call(on_interrogate_image),
-            inputs=[image] + common_input, outputs=common_output)
+        image.change(fn=wrap_gradio_gpu_call(on_interrogate_image),
+             inputs=[image] + common_input, outputs=common_output)
 
         batch_submit.click(fn=wrap_gradio_gpu_call(on_interrogate),
                            inputs=[input_glob, output_dir] + common_input,
