@@ -1,4 +1,5 @@
 """Settings tab entries for the tagger module"""
+import os
 from typing import List
 from modules import shared  # pylint: disable=import-error
 from gradio import inputs as gr
@@ -8,6 +9,8 @@ DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, 3_3,
 
 DEFAULT_OFF = '[name].[output_extension]'
 
+HF_CACHE = os.environ.get('HF_HOME', os.environ.get('HUGGINGFACE_HUB_CACHE',
+           str(os.path.join(shared.models_path, 'interrogators'))))
 
 def slider_wrapper(value, elem_id, **kwargs):
     # required or else gradio will throw errors
@@ -32,7 +35,6 @@ def on_ui_settings():
         key='tagger_out_filename_fmt',
         func=Its.set_output_filename_format
     )
-
     shared.opts.add_option(
         key='tagger_count_threshold',
         info=shared.OptionInfo(
@@ -43,7 +45,6 @@ def on_ui_settings():
             component_args={"minimum": 1.0, "maximum": 500.0, "step": 1.0},
         ),
     )
-
     shared.opts.add_option(
         key='tagger_batch_recursive',
         info=shared.OptionInfo(
@@ -120,11 +121,13 @@ def on_ui_settings():
             section=section,
         ),
     )
+    # see huggingface_hub guides/manage-cache
     shared.opts.add_option(
-        key='tagger_enable_unload',
+        key='tagger_hf_cache_dir',
         info=shared.OptionInfo(
-            False,
-            label='Unload tensorflow models from memory (experimental).',
+            HF_CACHE,
+            label='HuggingFace cache directory, '
+            'see huggingface_hub guides/manage-cache',
             section=section,
         ),
     )
@@ -137,6 +140,7 @@ def split_str(string: str, separator=',') -> List[str]:
 class InterrogatorSettings:
     kamojis = set(split_str(DEFAULT_KAMOJIS))
     output_filename_format = DEFAULT_OFF
+    hf_cache = HF_CACHE
 
     @classmethod
     def set_us_excl(cls):
