@@ -27,6 +27,7 @@ from tagger.uiset import IOData, QData  # pylint: disable=import-error
 TAG_INPUTS = ["add", "keep", "exclude", "search", "replace"]
 COMMON_OUTPUT = Tuple[
     str,               # tags as string
+    str,               # html tags as string
     str,               # discarded tags as string
     Dict[str, float],  # rating confidences
     Dict[str, float],  # tag confidences
@@ -156,12 +157,12 @@ def search_filter(filt: str) -> COMMON_OUTPUT:
         tags = {k: v for k, v in tags.items() if re_part.search(k)}
         lost = {k: v for k, v in lost.items() if re_part.search(k)}
 
-    tags_str = ', '.join(f'<a href="javascript:tag_clicked(\'{html_esc(k)}\','
-                         f'true)">{k}</a>' for k, v in tags.items())
-    lost_str = ', '.join(f'<a href="javascript:tag_clicked(\'{html_esc(k)}\','
-                         f'false)">{k}</a>' for k, v in lost.items())
+    h_tags = ', '.join(f'<a href="javascript:tag_clicked(\'{html_esc(k)}\','
+                       f'true)">{k}</a>' for k in tags.keys())
+    h_lost = ', '.join(f'<a href="javascript:tag_clicked(\'{html_esc(k)}\','
+                       f'false)">{k}</a>' for k in lost.keys())
 
-    return (tags_str, lost_str, ratings, tags, lost, info)
+    return (', '.join(tags.keys()), h_tags, h_lost, ratings, tags, lost, info)
 
 
 def on_ui_tabs():
@@ -355,7 +356,8 @@ def on_ui_tabs():
                 with gr.Tabs():
                     with gr.TabItem(label='Ratings and included tags'):
                         # clickable tags to populate excluded tags
-                        tags = gr.HTML(
+                        tags = gr.State(value="")
+                        html_tags = gr.HTML(
                             label='Tags',
                             elem_id='tags',
                         )
@@ -438,7 +440,7 @@ def on_ui_tabs():
 
         tab_gallery.select(fn=on_gallery, inputs=[], outputs=[gallery])
 
-        common_output = [tags, discarded_tags, rating_confidences,
+        common_output = [tags, html_tags, discarded_tags, rating_confidences,
                          tag_confidences, excluded_tag_confidences, info]
 
         # search input textbox
