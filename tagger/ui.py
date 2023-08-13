@@ -1,5 +1,5 @@
 """ This module contains the ui for the tagger tab. """
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 import gradio as gr
 import re
 from PIL import Image
@@ -26,17 +26,17 @@ from tagger.uiset import IOData, QData  # pylint: disable=import-error
 
 TAG_INPUTS = ["add", "keep", "exclude", "search", "replace"]
 COMMON_OUTPUT = Tuple[
-    str,               # tags as string
-    str,               # html tags as string
-    str,               # discarded tags as string
-    Dict[str, float],  # rating confidences
-    Dict[str, float],  # tag confidences
-    Dict[str, float],  # excluded tag confidences
+    Optional[str],               # tags as string
+    Optional[str],               # html tags as string
+    Optional[str],               # discarded tags as string
+    Optional[Dict[str, float]],  # rating confidences
+    Optional[Dict[str, float]],  # tag confidences
+    Optional[Dict[str, float]],  # excluded tag confidences
     str,               # error message
 ]
 
 
-def unload_interrogators() -> List[str]:
+def unload_interrogators() -> Tuple[str]:
     unloaded_models = 0
     remaining_models = ''
 
@@ -66,7 +66,7 @@ def on_interrogate(
         It.input["output_dir"] = output_dir
 
     if len(IOData.err) > 0:
-        return None, None, None, None, None, IOData.error_msg()
+        return (None,) * 6 + (IOData.error_msg(),)
 
     for i, val in enumerate(args):
         part = TAG_INPUTS[i]
@@ -77,7 +77,7 @@ def on_interrogate(
     interrogator: It = next((i for i in utils.interrogators.values() if
                              i.name == name), None)
     if interrogator is None:
-        return None, None, None, None, None, f"'{name}': invalid interrogator"
+        return (None,) * 6 + (f"'{name}': invalid interrogator",)
 
     interrogator.batch_interrogate()
     return search_filter(filt)
@@ -91,8 +91,9 @@ def on_interrogate_image(*args) -> COMMON_OUTPUT:
     # hack brcause image interrogaion occurs twice
     It.odd_increment = It.odd_increment + 1
     if It.odd_increment & 1 == 1:
-       return (None, None, None, None, None, '')
+        return (None,) * 6 + ('',)
     return on_interrogate_image_submit(*args)
+
 
 def on_interrogate_image_submit(
     image: Image, name: str, filt: str, *args
@@ -104,11 +105,11 @@ def on_interrogate_image_submit(
             It.input[part] = val
 
     if image is None:
-        return None, None, None, None, None, 'No image selected'
+        return (None,) * 6 + ('No image selected',)
     interrogator: It = next((i for i in utils.interrogators.values() if
                              i.name == name), None)
     if interrogator is None:
-        return None, None, None, None, None, f"'{name}': invalid interrogator"
+        return (None,) * 6 + (f"'{name}': invalid interrogator",)
 
     interrogator.interrogate_image(image)
     return search_filter(filt)
@@ -116,7 +117,7 @@ def on_interrogate_image_submit(
 
 def move_selection_to_input(
     filt: str, field: str
-) -> Tuple[str, str, str]:
+) -> Tuple[Optional[str], Optional[str], str]:
     """ moves the selected to the input field """
     if It.output is None:
         return (None, None, '')
@@ -139,11 +140,15 @@ def move_selection_to_input(
     return ('', data, info)
 
 
-def move_selection_to_keep(tag_search_filter: str) -> Tuple[str, str, str]:
+def move_selection_to_keep(
+    tag_search_filter: str
+) -> Tuple[Optional[str], Optional[str], str]:
     return move_selection_to_input(tag_search_filter, "keep")
 
 
-def move_selection_to_exclude(tag_search_filter: str) -> Tuple[str, str, str]:
+def move_selection_to_exclude(
+    tag_search_filter: str
+) -> Tuple[Optional[str], Optional[str], str]:
     return move_selection_to_input(tag_search_filter, "exclude")
 
 
@@ -151,7 +156,7 @@ def search_filter(filt: str) -> COMMON_OUTPUT:
     """ filters the tags and lost tags for the search field """
     ratings, tags, lost, info = It.output
     if ratings is None:
-        return (None, None, None, None, None, info)
+        return (None,) * 6 + (info,)
     if filt:
         re_part = re.compile('(' + re.sub(', ?', '|', filt) + ')')
         tags = {k: v for k, v in tags.items() if re_part.search(k)}
