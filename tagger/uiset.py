@@ -114,15 +114,16 @@ class IOData:
             return
         cls.err.discard(msg)
 
-        recursive = getattr(shared.opts, 'tagger_batch_recursive', '')
+        recursive = getattr(shared.opts, 'tagger_batch_recursive', False)
         path_mtimes = []
         for filename in glob(input_glob, recursive=recursive):
-            ext = os.path.splitext(filename)[1].lower()
-            if ext in supported_extensions:
-                path_mtimes.append(os.path.getmtime(filename))
-                paths.append(filename)
-            elif ext != '.txt' and 'db.json' not in filename:
-                print(f'{filename}: not an image extension: "{ext}"')
+            if not os.path.isdir(filename):
+                ext = os.path.splitext(filename)[1].lower()
+                if ext in supported_extensions:
+                    path_mtimes.append(os.path.getmtime(filename))
+                    paths.append(filename)
+                elif ext != '.txt' and 'db.json' not in filename:
+                    print(f'{filename}: not an image extension: "{ext}"')
 
         # interrogating in a directory with no pics, still flush the cache
         if len(path_mtimes) > 0 and cls.last_path_mtimes == path_mtimes:
