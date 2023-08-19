@@ -197,7 +197,8 @@ def on_ui_tabs():
                         input_glob = preset.component(
                             gr.Textbox,
                             value='',
-                            label='Input directory - See also settings tab.',
+                            label='Input directory - To recurse use ** or */* '
+                                  'in your glob; also the check settings tab.',
                             placeholder='/path/to/images or to/images/**/*'
                         )
                         output_dir = preset.component(
