@@ -113,7 +113,7 @@ class IOData:
             return
         cls.err.discard(msg)
 
-        recursive = getattr(shared.opts, 'tagger_batch_recursive', False)
+        recursive = getattr(shared.opts, 'tagger_batch_recursive', True)
         path_mtimes = []
         for filename in glob(input_glob, recursive=recursive):
             if not os.path.isdir(filename):
