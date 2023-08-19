@@ -100,14 +100,14 @@ class IOData:
         paths = []
 
         # if there is no glob pattern, insert it automatically
-        if not input_glob.endswith('*'):
+        if not input_glob.endswith('**'):
             if not input_glob.endswith(os.sep):
                 input_glob += os.sep
-            input_glob += '*'
+            input_glob += '**'
 
         # get root directory of input glob pattern
         base_dir = input_glob.replace('?', '*')
-        base_dir = base_dir.split(os.sep + '*').pop(0)
+        base_dir = base_dir.split(os.sep + '**').pop(0)
         msg = 'Invalid input directory'
         if not os.path.isdir(base_dir):
             cls.err.add(msg)
