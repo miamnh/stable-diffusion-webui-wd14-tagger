@@ -1,8 +1,8 @@
 # v1.1.2 (2023-08-26)
 
-explain recuisive path usage better in ui
+Explain recursive path usage better in ui
 Fix sending tags via buttons to txt2img and img2img
-type additions, inadverteably pushed, later retouched.
+type additions, inadvertently pushed, later retouched.
 allow setting gpu device via flag
 Fix inverted cumulative checkbox
 wrap_gradio_gpu_call fallback
@@ -10,9 +10,9 @@ Fix for preload shared access
 preload update
 A few ui changes
 Fix not clearing the tags after writing them to files
-Fix: Tags were still added, beyond count treshold
+Fix: Tags were still added, beyond count threshold
 fix search/replace bug
-(here int based weitghts were reverted)
+(here int based weights were reverted)
 circumvent when unable to load tensorflow
 fix for too many exclude_tags
 add db.json validation schema, add schema validation
@@ -21,8 +21,8 @@ pick up huggingface cache dir from env, with default, configurable also via sett
 leave tensorflow requirements to the user.
 Fix for Reappearance of gradio bug: duplicate image edit
 (index based weights, but later reverted)
-Instead of cache_dir use local_dir, leave cache to the user via env vars.
-requirements fix for MacOS
+Instead of cache_dir use local_dir, leav
+
 
 # v1.1.1 eada050 (2023-07-20) 
 
