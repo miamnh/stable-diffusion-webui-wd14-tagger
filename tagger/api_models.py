@@ -15,34 +15,19 @@ class TaggerInterrogateRequest(sd_models.InterrogateRequest):
         title='Threshold',
         description='The threshold used for the interrogate model.',
     )
-
-
-class TaggerQueueImageRequest(sd_models.InterrogateRequest):
-    name: str = Field(
-        title='Name',
-        description='Only queue the image, under this name.',
-    )
-
-
-class TaggerBatchRequest(sd_models.InterrogateRequest):
-    """Batch request model"""
-    model: str = Field(
-        title='Model',
-        description='The interrogate model used.',
+    queue: str = Field(
+        title='Queue',
+        description='name of queue; leave empty for single response',
     )
     name: str = Field(
         title='Name',
-        description='name of the last image',
-    )
-    threshold: float = Field(
-        title='Threshold',
-        description='The threshold used for the interrogate model.',
+        description='name to queue an image as; empty for the final response',
     )
 
 
 class TaggerInterrogateResponse(BaseModel):
     """Interrogate response model"""
-    caption: Dict[str, float] = Field(
+    caption: Dict[str, Dict[str, float]] = Field(
         title='Caption',
         description='The generated captions for the image.'
     )
@@ -53,17 +38,4 @@ class TaggerInterrogatorsResponse(BaseModel):
     models: List[str] = Field(
         title='Models',
         description=''
-    )
-
-
-class TaggerQueueImageResponse(BaseModel):
-    """Queue image response model"""
-    pass
-
-
-class TaggerBatchResponse(BaseModel):
-    """Batch response model"""
-    captions: Dict[str, Dict[str, float]] = Field(
-        title='Captions',
-        description='The generated captions for the images.'
     )
