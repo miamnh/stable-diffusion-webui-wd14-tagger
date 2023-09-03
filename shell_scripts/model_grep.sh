@@ -7,9 +7,9 @@
 ncpu=$(nproc --all)
 [ $ncpu -gt 8 ] && ncpu=8
 
-utilpath=.
 path=.
-out=safetensors_db.json
+utilpath=.
+
 while [ $# -gt 0 ]; do
     case "$1" in
       -h|--help)
