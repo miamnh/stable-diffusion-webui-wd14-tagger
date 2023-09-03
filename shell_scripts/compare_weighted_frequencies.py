@@ -59,24 +59,29 @@ query = data["query"]
 
 indices = set()
 if args.id == "":
-    print("Missing interrogator id, contained are:")
     uniq = set()
     for k in data["query"]:
         if k not in uniq:
-            print(k[64:])
             uniq.add(k[64:])
-    exit(1)
-else:
-    for k, t in data["query"].items():
-        img_fn, idx = t
-        if k[64:] == args.id:
-            if len(args.images) > 0:
-                for i in args.images:
-                    if img_fn[-len(i):] == i:
-                        break
-                else:
-                    continue
-            indices.add(int(idx))
+    if len(uniq) != 1:
+        print("Missing interrogator id, contained are:")
+        for k in uniq:
+            print(k)
+        exit(1)
+    else:
+        # use the only one
+        args.id = uniq.pop()
+
+for k, t in data["query"].items():
+    img_fn, idx = t
+    if k[64:] == args.id:
+        if len(args.images) > 0:
+            for i in args.images:
+                if img_fn[-len(i):] == i:
+                    break
+            else:
+                continue
+        indices.add(int(idx))
 
 interrogation_result = {}
 for t, lst in data["tag"].items():
