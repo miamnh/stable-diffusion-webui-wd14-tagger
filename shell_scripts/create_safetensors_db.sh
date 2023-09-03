@@ -15,7 +15,7 @@
 # cd stable-diffusion-webui/extensions/stable-diffusion-webui-wd14-tagger/
 # git clone https://github.com/by321/safetensors_util.git
 #
-# bash shell_scripts/create_safetensors_db.sh -f -p ../.. -u safetensors_util/ -o safetensors_db.json
+# bash shell_scripts/create_safetensors_db.sh -f -p ../../models/Lora -u safetensors_util/ -o safetensors_db.json
 #
 ## now you can compare interrogation weights with the safetensors_db.json using
 ## shell_scripts/compare_weighted_frequencies.py, see there for usage.
@@ -25,31 +25,32 @@
 ncpu=$(nproc --all)
 [ $ncpu -gt 8 ] && ncpu=8
 
-utilpath=./
-path=./
-out=safetensors_db.json
+path=.
+utilpath=.
 force=0
+out=safetensors_db.json
+
 while [ $# -gt 0 ]; do
     case "$1" in
       -h|--help)
-        echo "Usage: $0 [-f] [-p path] [-u utilpath] [-o out]"
-        echo "  -p path      path to stable-diffusion-webui"
-        echo "  -u utilpath  path to safetensors_util.py"
-        echo "  -o out       output file (default: safetensors_db.json)"
-        echo "  -f           force overwrite of output file"
+        echo "Usage: $0 [-j ncpu] [-p path] [-u utilpath] [-f] [-o out]"
         echo "  -j ncpu      number of cpus to use (default: $ncpu)"
+        echo "  -p path      path to directory containing safetensor models (default: ./)"
+        echo "  -u utilpath  path to safetensors_util.py"
+        echo "  -f           force overwrite of output file"
+        echo "  -o out       output file (default: safetensors_db.json)"
         exit 0
         ;;
+      -j) ncpu="$2"; shift 2;;
       -p) path="$2/"; shift 2;;
       -u) utilpath="$2/"; shift 2;;
-      -o) out="$2"; shift 2;;
       -f) force=1; shift 1;;
-      -j) ncpu="$2"; shift 2;;
+      -o) out="$2"; shift 2;;
     esac
 done
 
-if [ ! -d "${path}models/Lora/" ]; then
-  echo "Error: ${path}models/Lora/ does not exist (use -p to specify path)"
+if [ ! -d "${path}" ]; then
+  echo "Error: '${path}' does not exist (use -p to specify path)"
   exit 1
 fi
 
@@ -63,7 +64,7 @@ if [ -e "${out}" -a $force -eq 0 ]; then
   exit 1
 fi
 
-ls -1 ${path}models/Lora/*.safetensors | parallel -n 1 -j $ncpu "python ${utilpath}/safetensors_util.py metadata {} -pm 2>/dev/null |
+ls -1 ${path}/*.safetensors | parallel -n 1 -j $ncpu "python ${utilpath}/safetensors_util.py metadata {} -pm 2>/dev/null |
 sed -n '1b;p' | jq -r 'select(.__metadata__ != null) | .__metadata__ | .ss_tag_frequency | select( . != null )' 2>/dev/null | sed 's/\" /\"/' |
 awk -v FS=': ' '{
   if (index(\$2, \"null\") > 0) next
