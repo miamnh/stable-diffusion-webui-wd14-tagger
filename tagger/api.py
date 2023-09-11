@@ -28,21 +28,14 @@ class Api:
 
         self.app = app
         self.queue: Dict[str, asyncio.Queue] = {}
-        self.results: Dict[str, Dict[str, float]] = {}
+        self.results: Dict[str, Dict[str, Dict[str, float]]] = {}
         self.queue_lock = qlock
-        self.running_batches: Dict[str, Dict[str, asyncio.Task]] = \
-            defaultdict(dict)
 
         self.runner: Optional[asyncio.Task] = None
         self.prefix = prefix
 
         self.images: Dict[str, Dict[str, Dict[str, tuple[object, float]]]] = \
             defaultdict(lambda: defaultdict(dict))
-
-        self.finished_batches: Dict[str, Dict[str, asyncio.Task]] = \
-            defaultdict(dict)
-
-        self.reached_end: Dict[str, Dict[str, bool]] = defaultdict(dict)
 
         self.add_api_route(
             'interrogate',
@@ -127,12 +120,7 @@ class Api:
         m, q, n = (req.model, req.queue, req.name)
 
         with self.queue_lock:
-            if n == '' and q in self.running_batches[m]:
-                # wait for batch to finish
-                res = self.running_batches[m][q].result()
-                del self.running_batches[m][q]
-
-            elif q != '':
+            if q != '':
                 # clobber existing image
                 if n in self.images[m][q]:
                     i = 0
@@ -147,6 +135,8 @@ class Api:
                     self.queue[m] = asyncio.Queue()
                     self.queue[m].put_nowait((q, n, image, req.threshold))
                     self.runner = asyncio.create_task(self.batch_process(m))
+                if n == '':
+                    res = self.results[q]
             else:
                 interrogator = utils.interrogators[m]
                 rating, tag = interrogator.interrogate(image)
