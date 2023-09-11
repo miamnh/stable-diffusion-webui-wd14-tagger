@@ -319,9 +319,8 @@ class QData:
             cls.test_add(tag, 'add', ['exclude', 'search'])
 
         # silently raise count threshold to avoid issue in apply_filters
-        count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
-        if len(cls.add_tags) > count_threshold:
-            shared.opts.tagger_count_threshold = len(cls.add_tags)
+        if len(cls.add_tags) > cls.count_threshold:
+            cls.count_threshold = len(cls.add_tags)
 
     @staticmethod
     def compile_rex(rex: str) -> Optional:

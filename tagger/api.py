@@ -1,10 +1,9 @@
 """API module for FastAPI"""
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Optional
 from threading import Lock
 from secrets import compare_digest
 import asyncio
 from collections import defaultdict
-from itertools import cycle
 
 from modules import shared  # pylint: disable=import-error
 from modules.api.api import decode_base64_to_image  # pylint: disable=E0401
@@ -30,7 +29,7 @@ class Api:
 
         self.app = app
         self.queue: Dict[str, asyncio.Queue] = {}
-        self.results = Dict[str, Dict[str, Dict[str, float]]] = {}
+        self.results: Dict[str, Dict[str, float]] = {}
         self.queue_lock = qlock
         self.running_batches: Dict[str, Dict[str, asyncio.Task]] = \
             defaultdict(dict)
@@ -67,51 +66,30 @@ class Api:
             response_model=str,
         )
 
-    async def process_model(self, model: str) -> None:
-        """Process a batch of images"""
-        res: Dict[str, Dict[str, float]] = defaultdict(dict)
-        while len(self.queue[model]) > 0:
-            skipped = 0
-            for queue in self.queue[model]:
-                while True:
-                    try:
-                        queue_name, name, image, threshold = await queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        skipped += 1
-                        break # if empty move on to next queue for same model (if any)
-                    if name == "":
-                        # This is the end of the queue
-                        self.results[queue_name] = res[queue_name]
-                        del res[queue_name]
-                        skipped += 1
-                        break
-                    # No queue or queued_name, processes instead of queuing
-                    res[queue_name][name] = await self.endpoint_interrogate(
-                        models.TaggerInterrogateRequest(
-                            image=image,
-                            model=model,
-                            threshold=threshold,
-                            queue="",
-                            queued_name=""
-                        )
-                    )
-            if skipped == len(self.queue[model]):
-                # if all queues for this model are empty, postpone interrogration
-                # for this model and do other models first
-                break
+    async def batch_process(self, model: str) -> None:
+        done: Dict[str, bool] = {model: False}
 
-    async def batch_process(self) -> None:
         while len(self.queue) > 0:
-            for model in self.queue:
-                if model not in self.running_batches:
-                    self.running_batches[model] = asyncio.create_task(
-                        self.process_model(model)
-                    )
-                elif len(self.queue[model]) == 0:
-                    await self.running_batches[model]
-                    del self.running_batches[model]
+            while self.queue[model].qsize() > 0:
+                with self.queue_lock:
+                    q, n, i, t = self.queue[model].get_nowait()
+                    if n != "":
+                        # Leaving queue and _name empty to process, not queue
+                        self.results[q][n] = await self.endpoint_interrogate(
+                            models.TaggerInterrogateRequest(
+                                image=i,
+                                model=model,
+                                threshold=t,
+                                queue="",
+                                queued_name=""
+                            )
+                        )
+                    else:
+                        # This is the end of the queue
+                        done[model] = True
+            if done[model]:
+                del self.queue[model]
             await asyncio.sleep(0.1)
-
 
     def auth(self, creds: Optional[HTTPBasicCredentials] = None):
         if creds is None:
@@ -149,21 +127,13 @@ class Api:
         res: Dict[str, Dict[str, float]] = defaultdict(dict)
         m, q, n = (req.model, req.queue, req.name)
 
-        if n == '' and q in self.running_batches[m]:
-            # wait for batch to finish
-            res = self.running_batches[m][q].result()
-            del self.running_batches[m][q]
+        with self.queue_lock:
+            if n == '' and q in self.running_batches[m]:
+                # wait for batch to finish
+                res = self.running_batches[m][q].result()
+                del self.running_batches[m][q]
 
-        elif q != '':
-            # queueing interrogation of the image
-            with self.queue_lock:
-                # check before populating the queue
-                initialize_runner = len(self.queue) == 0
-
-                # create to retreive data when a queue is finished
-                if q not in self.queue[m]:
-                    self.queue[m][q] = asyncio.Queue()
-
+            elif q != '':
                 # clobber existing image
                 if n in self.images[m][q]:
                     i = 0
@@ -171,18 +141,21 @@ class Api:
                         i = i + 1
                     n = f'{n}.{i}'
 
-                # add image to queue
-                self.queue[m][q].put_nowait((n, image, req.threshold))
-                if initialize_runner:
-                    self.runner = asyncio.create_task(self.batch_process())
-        else:
-            interrogator = utils.interrogators[m]
-            with self.queue_lock:
+                if m in self.queue:
+                    # add image to queue
+                    self.queue[m].put_nowait((q, n, image, req.threshold))
+                else:
+                    self.queue[m] = asyncio.Queue()
+                    self.queue[m].put_nowait((q, n, image, req.threshold))
+                    self.runner = asyncio.create_task(self.batch_process(m))
+            else:
+                interrogator = utils.interrogators[m]
                 rating, tag = interrogator.interrogate(image)
 
-            if req.threshold > 0.0:
-                tag = {k: v for k, v in tag.items() if v > req.threshold}
-            res[n] = {**rating, **tag}
+                res[n] = {**rating}
+                for k, v in tag.items():
+                    if v > req.threshold:
+                        res[n][k] = v
 
         return models.TaggerInterrogateResponse(caption=res)
 
