@@ -98,9 +98,9 @@ class Api:
                                 threshold=t,
                             )
                         )
-                        self.res[m][n] = res["tag"]
+                        self.res[q][n] = res["tag"]
                         for k, v in res["rating"].items():
-                            self.res[m][n]["rating:"+k] = v
+                            self.res[q][n]["rating:"+k] = v
                     else:
                         # if there were any queries, mark it finished
                         del self.running_batches[m][q]
@@ -139,6 +139,24 @@ class Api:
                    Depends(self.auth)], **kwargs)
         return self.app.add_api_route(path, endpoint, **kwargs)
 
+    async def queue_interrogation(self, m, q, n='', i=None, t=0.0) -> Dict[
+        str, Dict[str, float]
+    ]:
+        """ queue an interrogation, or add to batch """
+        if n == '':
+            return await self.add_to_queue(m, q)
+        image = decode_base64_to_image(i)
+        if n == '<sha256>':
+            n = sha256(image.tobytes()).hexdigest()
+        elif f'{q}#{n}' in self.res[q]:
+            # clobber name if it's already in the queue
+            i = 0
+            while f'{q}#{n}#{i}' in self.res[q]:
+                i += 1
+            n = f'{q}#{n}#{i}'
+        # add image to queue
+        return await self.add_to_queue(m, q, n, image, t)
+
     def endpoint_interrogate(self, req: models.TaggerInterrogateRequest):
         """ one file interrogation, queueing, or batch results """
         if req.image is None:
@@ -148,31 +166,15 @@ class Api:
             raise HTTPException(404, 'Model not found')
 
         m, q, n = (req.model, req.queue, req.name_in_queue)
-        if n == '' and q != '':
-            # indicate the end of a queue
-            tup = (q, n, None, 0.0)
-            return self.loop.create_task(self.add_to_queue(m, tup)).result()
-
-        image = decode_base64_to_image(req.image)
-        res: Dict[str, Dict[str, float]] = defaultdict(dict)
+        res: Dict[str, Dict[str, float]] = {}
 
         if q != '':
-            if m not in self.queue:
-                self.queue[m] = asyncio.Queue()
-            if n == '<sha256>':
-                n = sha256(image.tobytes()).hexdigest()
-            elif f'{q}#{n}' in self.res[m]:
-                # clobber name if it's already in the queue
-                i = 0
-                while f'{q}#{n}#{i}' in self.res[m]:
-                    i += 1
-                n = f'{q}#{n}#{i}'
-            # add image to queue
-            res = self.loop.create_task(
-                self.add_to_queue(m, q, n, image, req.threshold)
-            ).result()
+            res = asyncio.run(self.queue_interrogation(m, q, n, req.image,
+                              req.threshold))
         else:
+            image = decode_base64_to_image(req.image)
             interrogator = utils.interrogators[m]
+            res = {"tag": {}, "rating": {}}
             res["rating"], tag = interrogator.interrogate(image)
 
             for k, v in tag.items():
