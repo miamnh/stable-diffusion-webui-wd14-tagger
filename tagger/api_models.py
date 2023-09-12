@@ -14,7 +14,7 @@ class TaggerInterrogateRequest(sd_models.InterrogateRequest):
     threshold: float = Field(
         title='Threshold',
         description='The threshold used for the interrogate model.',
-        default=1.0,
+        default=0.0,
     )
     queue: str = Field(
         title='Queue',
