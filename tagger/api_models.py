@@ -19,9 +19,10 @@ class TaggerInterrogateRequest(sd_models.InterrogateRequest):
         title='Queue',
         description='name of queue; leave empty for single response',
     )
-    name: str = Field(
+    name_in_queue: str = Field(
         title='Name',
-        description='name to queue an image as; empty for the final response',
+        description='name to queue image as or use <sha256>. leave empty to '
+                    'retrieve the final response',
     )
 
 
