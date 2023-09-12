@@ -42,9 +42,9 @@ class IOData:
     last_path_mtimes = None
     base_dir = None
     output_root = None
-    paths = []
+    paths: List[List[str]] = []
     save_tags = True
-    err = set()
+    err: Set[str] = set()
 
     @classmethod
     def error_msg(cls) -> str:
@@ -52,7 +52,7 @@ class IOData:
                "</ul>"
 
     @classmethod
-    def flip_save_tags(cls) -> callable:
+    def flip_save_tags(cls) -> Callable:
         def toggle():
             cls.save_tags = not cls.save_tags
         return toggle

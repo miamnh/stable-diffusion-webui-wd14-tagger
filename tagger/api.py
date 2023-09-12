@@ -4,6 +4,7 @@ from threading import Lock
 from secrets import compare_digest
 import asyncio
 from collections import defaultdict
+from hashlib import sha256
 
 from modules import shared  # pylint: disable=import-error
 from modules.api.api import decode_base64_to_image  # pylint: disable=E0401
@@ -29,14 +30,14 @@ class Api:
 
         self.app = app
         self.queue: Dict[str, asyncio.Queue] = {}
-        self.results: Dict[str, Dict[str, Dict[str, float]]] = {}
+        self.res: Dict[str, Dict[str, Dict[str, float]]] = \
+            defaultdict(dict)
         self.queue_lock = qlock
 
         self.runner: Optional[asyncio.Task] = None
         self.prefix = prefix
-
-        self.images: Dict[str, Dict[str, Dict[str, tuple[object, float]]]] = \
-            defaultdict(lambda: defaultdict(dict))
+        self.running_batches: Dict[str, Dict[str, float]] = \
+            defaultdict(lambda: defaultdict(int))
 
         self.add_api_route(
             'interrogate',
@@ -59,30 +60,58 @@ class Api:
             response_model=str,
         )
 
-    async def batch_process(self, model: str) -> None:
-        done: Dict[str, bool] = {model: False}
+    async def add_to_queue(self, m, q, n='', i=None, th=0.0) -> Dict[
+        str, Dict[str, float]
+    ]:
+        with self.queue_lock:
+            if m not in self.queue:
+                self.queue[m] = asyncio.Queue()
+            await self.queue[m].put((q, n, i, th))
+        if i is not None:
+            if self.runner is None:
+                self.runner = asyncio.create_task(self.batch_process())
+            # return how many interrogations are done so far per queue
+            return self.running_batches
+        # wait for the result to become available
+        while q in self.running_batches[m]:
+            await asyncio.sleep(0.1)
+        return self.res.pop(q)
 
+    async def batch_process(self) -> None:
         while len(self.queue) > 0:
-            while self.queue[model].qsize() > 0:
-                with self.queue_lock:
-                    q, n, i, t = self.queue[model].get_nowait()
+            for m in self.queue:
+                # if zero the queue might just be pending
+                while self.queue[m].qsize() > 0:
+                    with self.queue_lock:
+                        q, n, i, t = self.queue[m].get_nowait()
                     if n != "":
-                        # Leaving queue and _name empty to process, not queue
-                        self.results[q][n] = await self.endpoint_interrogate(
+                        if self.running_batches[m][q] < 0:
+                            print(f"Queue {q} is closed")
+                            continue
+                        self.running_batches[m][q] += 1.0
+                        # queue empty to process, not queue
+                        self.res[m][n] = await self.endpoint_interrogate(
                             models.TaggerInterrogateRequest(
                                 image=i,
-                                model=model,
+                                model=m,
                                 threshold=t,
                                 queue="",
-                                queued_name=""
+                                name_in_queue=n
                             )
                         )
                     else:
-                        # This is the end of the queue
-                        done[model] = True
-            if done[model]:
-                del self.queue[model]
-            await asyncio.sleep(0.1)
+                        # if there were any queries, mark it finished
+                        del self.running_batches[m][q]
+
+            for model in self.running_batches:
+                if len(self.running_batches[model]) == 0:
+                    with self.queue_lock:
+                        del self.queue[model]
+            else:
+                await asyncio.sleep(0.1)
+
+        self.running_batches.clear()
+        self.runner = None
 
     def auth(self, creds: Optional[HTTPBasicCredentials] = None):
         if creds is None:
@@ -109,43 +138,44 @@ class Api:
         return self.app.add_api_route(path, endpoint, **kwargs)
 
     def endpoint_interrogate(self, req: models.TaggerInterrogateRequest):
-        """ one file interrogation """
+        """ one file interrogation, queueing, or batch results """
         if req.image is None:
             raise HTTPException(404, 'Image not found')
 
         if req.model not in utils.interrogators:
             raise HTTPException(404, 'Model not found')
 
+        m, q, n = (req.model, req.queue, req.name_in_queue)
+        if n == '' and q != '':
+            # indicate the end of a queue
+            tup = (q, n, None, 0.0)
+            return asyncio.create_task(self.add_to_queue(m, tup)).result()
+
         image = decode_base64_to_image(req.image)
         res: Dict[str, Dict[str, float]] = defaultdict(dict)
-        m, q, n = (req.model, req.queue, req.name)
 
-        with self.queue_lock:
-            if q != '':
-                # clobber existing image
-                if n in self.images[m][q]:
-                    i = 0
-                    while f'{n}.{i}' in self.images[m][q]:
-                        i = i + 1
-                    n = f'{n}.{i}'
+        if q != '':
+            if m not in self.queue:
+                self.queue[m] = asyncio.Queue()
+            if n == '<sha256>':
+                n = sha256(image.tobytes()).hexdigest()
+            elif f'{q}#{n}' in self.res[m]:
+                # clobber name if it's already in the queue
+                i = 0
+                while f'{q}#{n}#{i}' in self.res[m]:
+                    i += 1
+                n = f'{q}#{n}#{i}'
+            # add image to queue
+            res = asyncio.create_task(
+                self.add_to_queue(m, q, n, image, req.threshold)
+            ).result()
+        else:
+            interrogator = utils.interrogators[m]
+            res[n], tag = interrogator.interrogate(image)
 
-                if m in self.queue:
-                    # add image to queue
-                    self.queue[m].put_nowait((q, n, image, req.threshold))
-                else:
-                    self.queue[m] = asyncio.Queue()
-                    self.queue[m].put_nowait((q, n, image, req.threshold))
-                    self.runner = asyncio.create_task(self.batch_process(m))
-                if n == '':
-                    res = self.results[q]
-            else:
-                interrogator = utils.interrogators[m]
-                rating, tag = interrogator.interrogate(image)
-
-                res[n] = {**rating}
-                for k, v in tag.items():
-                    if v > req.threshold:
-                        res[n][k] = v
+            for k, v in tag.items():
+                if v > req.threshold:
+                    res[n][k] = v
 
         return models.TaggerInterrogateResponse(caption=res)
 
