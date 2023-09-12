@@ -92,15 +92,16 @@ class Api:
                             continue
                         self.running_batches[m][q] += 1.0
                         # queue empty to process, not queue
-                        self.res[m][n] = await self.endpoint_interrogate(
+                        res = await self.endpoint_interrogate(
                             models.TaggerInterrogateRequest(
                                 image=i,
                                 model=m,
                                 threshold=t,
-                                queue="",
-                                name_in_queue=n
                             )
                         )
+                        self.res[m][n] = res["tag"]
+                        for k, v in res["rating"].items():
+                            self.res[m][n]["rating:"+k] = v
                     else:
                         # if there were any queries, mark it finished
                         del self.running_batches[m][q]
@@ -173,11 +174,11 @@ class Api:
             ).result()
         else:
             interrogator = utils.interrogators[m]
-            res[n], tag = interrogator.interrogate(image)
+            res["rating"], tag = interrogator.interrogate(image)
 
             for k, v in tag.items():
                 if v > req.threshold:
-                    res[n][k] = v
+                    res["tag"][k] = v
 
         return models.TaggerInterrogateResponse(caption=res)
 
