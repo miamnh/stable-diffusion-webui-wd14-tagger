@@ -51,7 +51,7 @@ class IOData:
                "</ul>"
 
     @classmethod
-    def flip_save_tags(cls) -> Callable:
+    def flip_save_tags(cls) -> callable:
         def toggle():
             cls.save_tags = not cls.save_tags
         return toggle
