@@ -32,6 +32,7 @@ class Api:
         self.res: Dict[str, Dict[str, Dict[str, float]]] = \
             defaultdict(dict)
         self.queue_lock = qlock
+        self.loop = asyncio.get_event_loop()
 
         self.runner: Optional[asyncio.Task] = None
         self.prefix = prefix
@@ -66,9 +67,10 @@ class Api:
             if m not in self.queue:
                 self.queue[m] = asyncio.Queue()
             await self.queue[m].put((q, n, i, th))
+
         if i is not None:
             if self.runner is None:
-                self.runner = asyncio.create_task(self.batch_process())
+                self.runner = self.loop.create_task(self.batch_process())
             # return how many interrogations are done so far per queue
             return self.running_batches
         # wait for the result to become available
@@ -148,7 +150,7 @@ class Api:
         if n == '' and q != '':
             # indicate the end of a queue
             tup = (q, n, None, 0.0)
-            return asyncio.create_task(self.add_to_queue(m, tup)).result()
+            return self.loop.create_task(self.add_to_queue(m, tup)).result()
 
         image = decode_base64_to_image(req.image)
         res: Dict[str, Dict[str, float]] = defaultdict(dict)
@@ -165,7 +167,7 @@ class Api:
                     i += 1
                 n = f'{q}#{n}#{i}'
             # add image to queue
-            res = asyncio.create_task(
+            res = self.loop.create_task(
                 self.add_to_queue(m, q, n, image, req.threshold)
             ).result()
         else:
