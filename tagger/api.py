@@ -32,6 +32,7 @@ class Api:
         self.res: Dict[str, Dict[str, Dict[str, float]]] = \
             defaultdict(dict)
         self.queue_lock = qlock
+        self.tasks: Dict[str, asyncio.Task] = {}
 
         self.runner: Optional[asyncio.Task] = None
         self.prefix = prefix
@@ -67,15 +68,34 @@ class Api:
                 self.queue[m] = asyncio.Queue()
             await self.queue[m].put((q, n, i, th))
 
-        if n != '':
-            if self.runner is None:
-                self.runner = await asyncio.create_task(self.batch_process())
-            # return how many interrogations are done so far per queue
-            print("add_to_queue: " + repr(self.running_batches))
-            return self.running_batches
-        # wait for the result to become available
-        while q in self.running_batches[m]:
-            await asyncio.sleep(0.1)
+        if self.runner is None:
+            self.runner = await asyncio.create_task(self.batch_process())
+
+        return await self.tasks[q+"\t"+n]
+
+    async def do_queued_interrogation(self, m, q, n, i, t) -> Dict[
+        str, Dict[str, float]
+    ]:
+        self.running_batches[m][q] += 1.0
+        # queue empty to process, not queue
+        res = self.endpoint_interrogate(
+            models.TaggerInterrogateRequest(
+                image=i,
+                model=m,
+                threshold=t,
+                name_in_queue=n,
+                queue=''
+            )
+        )
+        self.res[q][n] = res.caption["tag"]
+        for k, v in res.caption["rating"].items():
+            self.res[q][n]["rating:"+k] = v
+        return self.running_batches
+
+    async def finish_queue(self, m, q) -> Dict[str, Dict[str, float]]:
+        with self.queue_lock:
+            if q in self.running_batches[m]:
+                del self.running_batches[m][q]
         return self.res.pop(q)
 
     async def batch_process(self) -> None:
@@ -85,24 +105,10 @@ class Api:
                 while self.queue[m].qsize() > 0:
                     with self.queue_lock:
                         q, n, i, t = self.queue[m].get_nowait()
-                    if n != "":
-                        self.running_batches[m][q] += 1.0
-                        # queue empty to process, not queue
-                        res = self.endpoint_interrogate(
-                            models.TaggerInterrogateRequest(
-                                image=i,
-                                model=m,
-                                threshold=t,
-                                name_in_queue=n,
-                                queue=''
-                            )
-                        )
-                        self.res[q][n] = res.caption["tag"]
-                        for k, v in res.caption["rating"].items():
-                            self.res[q][n]["rating:"+k] = v
-                    else:
-                        # if there were any queries, mark it finished
-                        del self.running_batches[m][q]
+                    self.tasks[q+"\t"+n] = asyncio.create_task(
+                        self.do_queued_interrogation(m, q, n, i, t) if n != ""
+                        else self.finish_queue(m, q)
+                    )
 
             for model in self.running_batches:
                 if len(self.running_batches[model]) == 0:
