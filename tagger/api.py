@@ -33,7 +33,7 @@ class Api:
         self.res: Dict[str, Dict[str, Dict[str, float]]] = \
             defaultdict(dict)
         self.queue_lock = qlock
-        self.loop = asyncio.get_event_loop()
+        self.loop = None
 
         self.runner: Optional[asyncio.Task] = None
         self.prefix = prefix
@@ -69,10 +69,12 @@ class Api:
                 self.queue[m] = asyncio.Queue()
             await self.queue[m].put((q, n, i, th))
 
-        if i is not None:
-            if self.runner is None:
+        if n != '':
+            if self.loop is None:
+                self.loop = asyncio.get_event_loop()
                 self.runner = self.loop.create_task(self.batch_process())
             # return how many interrogations are done so far per queue
+            print("add_to_queue: " + repr(self.running_batches))
             return self.running_batches
         # wait for the result to become available
         while q in self.running_batches[m]:
@@ -145,7 +147,9 @@ class Api:
     ]:
         """ queue an interrogation, or add to batch """
         if n == '':
-            return await self.add_to_queue(m, q)
+            res = await self.add_to_queue(m, q)
+            print("queue_interrogation1: " + repr(res))
+            return res
         image = decode_base64_to_image(i)
         if n == '<sha256>':
             n = sha256(image.tobytes()).hexdigest()
@@ -156,7 +160,9 @@ class Api:
                 i += 1
             n = f'{q}#{n}#{i}'
         # add image to queue
-        return await self.add_to_queue(m, q, n, image, t)
+        res = await self.add_to_queue(m, q, n, image, t)
+        print("queue_interrogation2: " + repr(res))
+        return res
 
     def endpoint_interrogate(self, req: models.TaggerInterrogateRequest):
         """ one file interrogation, queueing, or batch results """
