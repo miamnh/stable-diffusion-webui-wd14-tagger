@@ -98,7 +98,7 @@ def on_ui_settings():
         key='tagger_repl_us_excl',
         info=shared.OptionInfo(
             DEFAULT_KAMOJIS,
-            label='Excudes (split by comma)',
+            label='Underscore replacement excudes (split by comma)',
             section=section,
         ),
     )
