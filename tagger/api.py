@@ -33,7 +33,6 @@ class Api:
         self.res: Dict[str, Dict[str, Dict[str, float]]] = \
             defaultdict(dict)
         self.queue_lock = qlock
-        self.loop = None
 
         self.runner: Optional[asyncio.Task] = None
         self.prefix = prefix
@@ -70,9 +69,8 @@ class Api:
             await self.queue[m].put((q, n, i, th))
 
         if n != '':
-            if self.loop is None:
-                self.loop = asyncio.get_event_loop()
-                self.runner = self.loop.create_task(self.batch_process())
+            if self.runner is None:
+                self.runner = await asyncio.create_task(self.batch_process())
             # return how many interrogations are done so far per queue
             print("add_to_queue: " + repr(self.running_batches))
             return self.running_batches
@@ -89,20 +87,19 @@ class Api:
                     with self.queue_lock:
                         q, n, i, t = self.queue[m].get_nowait()
                     if n != "":
-                        if self.running_batches[m][q] < 0:
-                            print(f"Queue {q} is closed")
-                            continue
                         self.running_batches[m][q] += 1.0
                         # queue empty to process, not queue
-                        res = await self.endpoint_interrogate(
+                        res = self.endpoint_interrogate(
                             models.TaggerInterrogateRequest(
                                 image=i,
                                 model=m,
                                 threshold=t,
+                                name_in_queue=n,
+                                queue=''
                             )
                         )
-                        self.res[q][n] = res["tag"]
-                        for k, v in res["rating"].items():
+                        self.res[q][n] = res.caption["tag"]
+                        for k, v in res.caption["rating"].items():
                             self.res[q][n]["rating:"+k] = v
                     else:
                         # if there were any queries, mark it finished
@@ -150,17 +147,16 @@ class Api:
             res = await self.add_to_queue(m, q)
             print("queue_interrogation1: " + repr(res))
             return res
-        image = decode_base64_to_image(i)
         if n == '<sha256>':
-            n = sha256(image.tobytes()).hexdigest()
+            n = sha256(i).hexdigest()
         elif f'{q}#{n}' in self.res[q]:
             # clobber name if it's already in the queue
-            i = 0
-            while f'{q}#{n}#{i}' in self.res[q]:
-                i += 1
-            n = f'{q}#{n}#{i}'
+            j = 0
+            while f'{q}#{n}#{j}' in self.res[q]:
+                j += 1
+            n = f'{q}#{n}#{j}'
         # add image to queue
-        res = await self.add_to_queue(m, q, n, image, t)
+        res = await self.add_to_queue(m, q, n, i, t)
         print("queue_interrogation2: " + repr(res))
         return res
 
@@ -177,7 +173,7 @@ class Api:
 
         if q != '':
             res = asyncio.run(self.queue_interrogation(m, q, n, req.image,
-                              req.threshold))
+                                                       req.threshold))
         else:
             image = decode_base64_to_image(req.image)
             interrogator = utils.interrogators[m]
