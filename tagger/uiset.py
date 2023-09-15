@@ -41,9 +41,9 @@ class IOData:
     last_path_mtimes = None
     base_dir = None
     output_root = None
-    paths = []
+    paths: List[List[str]] = []
     save_tags = True
-    err = set()
+    err: Set[str] = set()
 
     @classmethod
     def error_msg(cls) -> str:
@@ -203,6 +203,7 @@ class QData:
     replace_tags = []
     threshold = 0.35
     tag_frac_threshold = 0.05
+    count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
 
     # read from db.json, update with what should be written to db.json:
     json_db = None
@@ -317,9 +318,8 @@ class QData:
             cls.test_add(tag, 'add', ['exclude', 'search'])
 
         # silently raise count threshold to avoid issue in apply_filters
-        count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
-        if len(cls.add_tags) > count_threshold:
-            shared.opts.tagger_count_threshold = len(cls.add_tags)
+        if len(cls.add_tags) > cls.count_threshold:
+            cls.count_threshold = len(cls.add_tags)
 
     @staticmethod
     def compile_rex(rex: str) -> Optional:
@@ -500,8 +500,7 @@ class QData:
                 cls.weighed[0][rating].append(val + index)
             cls.ratings[rating] += val
 
-        count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
-        max_ct = count_threshold - len(cls.add_tags)
+        max_ct = cls.count_threshold - len(cls.add_tags)
         count = 0
         # loop over tags with db update
         for tag, val in tags:

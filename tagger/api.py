@@ -1,7 +1,10 @@
 """API module for FastAPI"""
-from typing import Callable
+from typing import Callable, Dict, Optional
 from threading import Lock
 from secrets import compare_digest
+import asyncio
+from collections import defaultdict
+from hashlib import sha256
 
 from modules import shared  # pylint: disable=import-error
 from modules.api.api import decode_base64_to_image  # pylint: disable=E0401
@@ -11,13 +14,12 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from tagger import utils  # pylint: disable=import-error
 from tagger import api_models as models  # pylint: disable=import-error
-from tagger.uiset import QData  # pylint: disable=import-error
 
 
 class Api:
     """Api class for FastAPI"""
     def __init__(
-        self, app: FastAPI, qlock: Lock, prefix: str = None
+        self, app: FastAPI, qlock: Lock, prefix: Optional[str] = None
     ) -> None:
         if shared.cmd_opts.api_auth:
             self.credentials = {}
@@ -26,8 +28,16 @@ class Api:
                 self.credentials[user] = password
 
         self.app = app
+        self.queue: Dict[str, asyncio.Queue] = {}
+        self.res: Dict[str, Dict[str, Dict[str, float]]] = \
+            defaultdict(dict)
         self.queue_lock = qlock
+        self.tasks: Dict[str, asyncio.Task] = {}
+
+        self.runner: Optional[asyncio.Task] = None
         self.prefix = prefix
+        self.running_batches: Dict[str, Dict[str, float]] = \
+            defaultdict(lambda: defaultdict(int))
 
         self.add_api_route(
             'interrogate',
@@ -40,17 +50,85 @@ class Api:
             'interrogators',
             self.endpoint_interrogators,
             methods=['GET'],
-            response_model=models.InterrogatorsResponse
+            response_model=models.TaggerInterrogatorsResponse
         )
 
         self.add_api_route(
-            "unload-interrogators",
+            'unload-interrogators',
             self.endpoint_unload_interrogators,
-            methods=["POST"],
+            methods=['POST'],
             response_model=str,
         )
 
-    def auth(self, creds: HTTPBasicCredentials = None):
+    async def add_to_queue(self, m, q, n='', i=None, t=0.0) -> Dict[
+        str, Dict[str, float]
+    ]:
+        if m not in self.queue:
+            self.queue[m] = asyncio.Queue()
+        #  loop = asyncio.get_running_loop()
+        #  asyncio.run_coroutine_threadsafe(
+        task = asyncio.create_task(self.queue[m].put((q, n, i, t)))
+        #  , loop)
+
+        if self.runner is None:
+            loop = asyncio.get_running_loop()
+            asyncio.ensure_future(self.batch_process(), loop=loop)
+        await task
+        return await self.tasks[q+"\t"+n]
+
+    async def do_queued_interrogation(self, m, q, n, i, t) -> Dict[
+        str, Dict[str, float]
+    ]:
+        self.running_batches[m][q] += 1.0
+        # queue empty to process, not queue
+        res = self.endpoint_interrogate(
+            models.TaggerInterrogateRequest(
+                image=i,
+                model=m,
+                threshold=t,
+                name_in_queue=n,
+                queue=''
+            )
+        )
+        self.res[q][n] = res.caption["tag"]
+        for k, v in res.caption["rating"].items():
+            self.res[q][n]["rating:"+k] = v
+        return self.running_batches
+
+    async def finish_queue(self, m, q) -> Dict[str, Dict[str, float]]:
+        if q in self.running_batches[m]:
+            del self.running_batches[m][q]
+        if q in self.res:
+            return self.res.pop(q)
+        return self.running_batches
+
+    async def batch_process(self) -> None:
+        #  loop = asyncio.get_running_loop()
+        while len(self.queue) > 0:
+            for m in self.queue:
+                # if zero the queue might just be pending
+                while True:
+                    try:
+                        #  q, n, i, t = asyncio.run_coroutine_threadsafe(
+                        #  self.queue[m].get_nowait(), loop).result()
+                        q, n, i, t = self.queue[m].get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    self.tasks[q+"\t"+n] = asyncio.create_task(
+                        self.do_queued_interrogation(m, q, n, i, t) if n != ""
+                        else self.finish_queue(m, q)
+                    )
+
+            for model in self.running_batches:
+                if len(self.running_batches[model]) == 0:
+                    del self.queue[model]
+            else:
+                await asyncio.sleep(0.1)
+
+        self.running_batches.clear()
+        self.runner = None
+
+    def auth(self, creds: Optional[HTTPBasicCredentials] = None):
         if creds is None:
             creds = Depends(HTTPBasic())
         if creds.username in self.credentials:
@@ -74,34 +152,57 @@ class Api:
                    Depends(self.auth)], **kwargs)
         return self.app.add_api_route(path, endpoint, **kwargs)
 
+    async def queue_interrogation(self, m, q, n='', i=None, t=0.0) -> Dict[
+        str, Dict[str, float]
+    ]:
+        """ queue an interrogation, or add to batch """
+        if n == '':
+            task = asyncio.create_task(self.add_to_queue(m, q))
+        else:
+            if n == '<sha256>':
+                n = sha256(i).hexdigest()
+                if n in self.res[q]:
+                    return self.running_batches
+            elif n in self.res[q]:
+                # clobber name if it's already in the queue
+                j = 0
+                while f'{n}#{j}' in self.res[q]:
+                    j += 1
+                n = f'{n}#{j}'
+            self.res[q][n] = {}
+            # add image to queue
+            task = asyncio.create_task(self.add_to_queue(m, q, n, i, t))
+        return await task
+
     def endpoint_interrogate(self, req: models.TaggerInterrogateRequest):
+        """ one file interrogation, queueing, or batch results """
         if req.image is None:
             raise HTTPException(404, 'Image not found')
 
-        if req.model not in utils.interrogators.keys():
+        if req.model not in utils.interrogators:
             raise HTTPException(404, 'Model not found')
 
-        image = decode_base64_to_image(req.image)
-        interrogator = utils.interrogators[req.model]
+        m, q, n = (req.model, req.queue, req.name_in_queue)
+        res: Dict[str, Dict[str, float]] = {}
 
-        with self.queue_lock:
-            QData.tags.clear()
-            QData.ratings.clear()
-            QData.in_db.clear()
-            QData.for_tags_file.clear()
-            data = ('', '', '') + interrogator.interrogate(image)
-            QData.apply_filters(data)
-            output = QData.finalize(1)
+        if q != '':
+            res = asyncio.run(self.queue_interrogation(m, q, n, req.image,
+                                                       req.threshold))
+        else:
+            image = decode_base64_to_image(req.image)
+            interrogator = utils.interrogators[m]
+            res = {"tag": {}, "rating": {}}
+            with self.queue_lock:
+                res["rating"], tag = interrogator.interrogate(image)
 
-        return models.TaggerInterrogateResponse(
-            caption={
-                **output[0],
-                **output[1],
-                **output[2],
-            })
+            for k, v in tag.items():
+                if v > req.threshold:
+                    res["tag"][k] = v
+
+        return models.TaggerInterrogateResponse(caption=res)
 
     def endpoint_interrogators(self):
-        return models.InterrogatorsResponse(
+        return models.TaggerInterrogatorsResponse(
             models=list(utils.interrogators.keys())
         )
 
