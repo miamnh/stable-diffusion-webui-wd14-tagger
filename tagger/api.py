@@ -161,17 +161,15 @@ class Api:
         else:
             if n == '<sha256>':
                 n = sha256(i).hexdigest()
-            elif f'{q}#{n}' in self.res[q]:
+            elif n in self.res[q]:
                 # clobber name if it's already in the queue
                 j = 0
-                while f'{q}#{n}#{j}' in self.res[q]:
+                while f'{n}#{j}' in self.res[q]:
                     j += 1
-                n = f'{q}#{n}#{j}'
+                n = f'{n}#{j}'
             # add image to queue
             task = asyncio.create_task(self.add_to_queue(m, q, n, i, t))
-        res = await task
-        print( "queue_interrogation: " + repr(res))
-        return res
+        return await task
 
     def endpoint_interrogate(self, req: models.TaggerInterrogateRequest):
         """ one file interrogation, queueing, or batch results """
@@ -186,7 +184,7 @@ class Api:
 
         if q != '':
             res = asyncio.run(self.queue_interrogation(m, q, n, req.image,
-                                                       req.threshold), debug =True)
+                                                       req.threshold))
         else:
             image = decode_base64_to_image(req.image)
             interrogator = utils.interrogators[m]
