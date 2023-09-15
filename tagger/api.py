@@ -161,12 +161,15 @@ class Api:
         else:
             if n == '<sha256>':
                 n = sha256(i).hexdigest()
+                if n in self.res[q]:
+                    return self.running_batches
             elif n in self.res[q]:
                 # clobber name if it's already in the queue
                 j = 0
                 while f'{n}#{j}' in self.res[q]:
                     j += 1
                 n = f'{n}#{j}'
+            self.res[q][n] = {}
             # add image to queue
             task = asyncio.create_task(self.add_to_queue(m, q, n, i, t))
         return await task
