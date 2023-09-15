@@ -1,4 +1,46 @@
-# v1.1.2 (2023-08-26)
+
+Api changes:
+Image interrogation via api receives two extra parameters; empty strings by
+default. `queue`: the name for a queue, which could be e.g. the person or
+subject name. You can leave it empty for the first interrogation, then the
+response will que in a new auto-generated unique name, listed in the response.
+
+Make sure you use this same name as queue, for all interrogations that you want
+to be grouped together. The second parameter is `name_in_queue`: the name for
+that particular image that is being queued, e.g. a file name.
+
+If both queue and name are empty, there is a single interrogation with response,
+which includes nested objects "ratings" and "tags", so:
+`{"ratings": {"sensitive": 0.5, ..}, "tags": {"tag1": 0.5, ..}}`
+
+If neither name nor queue are empty, the interrogation is queued under that name.
+If already in queue, that name is changed - clobbered - with #. An exception is if
+the given name is <sha256> in which case an image checksum will be used instead of
+a name. Duplicates are ignored.
+
+During queuing, the response is the number of all processed interrogations for all
+active queues.
+
+If name_in_queue is empty, but queue is not, that particular queue is finalized,
+A response is awaited for remaining interrogations in this queue (if any still).
+The response, only for this queue, is an object with the name_in_queue as key,
+and the tag with weights contained. Ratings have ther tag name prefixed with
+"rating:". Example:
+`{"name_in_queue": {"rating:sensitive": 0.5, "tag1": 0.5, ..}}`
+
+Fix in absence of tensrflow_io
+Fix deprecation warning
+Added three scripts in shell scripts under shell_scripts:
+ * A bash script to generate per safetensors file the fraction of images
+   that the model was trained on that was tagged with particular tokens.
+ * A python script to compare the interrogation results (read from db.json)
+   and find the top -c safetensors files that contain similar weights (or at
+   least, that was the intention, there may be better algorithms to compare,
+   but it seems to do the job).
+ * And finally a model_grep script which listts the tags and number of trained
+   images in a safetensors model.
+
+# v1.1.2 c9f8efd (2023-08-26)
 
 Explain recursive path usage better in ui
 Fix sending tags via buttons to txt2img and img2img
