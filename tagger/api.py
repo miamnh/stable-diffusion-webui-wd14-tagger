@@ -61,17 +61,20 @@ class Api:
             response_model=str,
         )
 
-    async def add_to_queue(self, m, q, n='', i=None, th=0.0) -> Dict[
+    async def add_to_queue(self, m, q, n='', i=None, t=0.0) -> Dict[
         str, Dict[str, float]
     ]:
-        with self.queue_lock:
-            if m not in self.queue:
-                self.queue[m] = asyncio.Queue()
-            await self.queue[m].put((q, n, i, th))
+        if m not in self.queue:
+            self.queue[m] = asyncio.Queue()
+        #  loop = asyncio.get_running_loop()
+        #  asyncio.run_coroutine_threadsafe(
+        task = asyncio.create_task(self.queue[m].put((q, n, i, t)))
+        #  , loop)
 
         if self.runner is None:
-            self.runner = await asyncio.create_task(self.batch_process())
-
+            loop = asyncio.get_running_loop()
+            asyncio.ensure_future(self.batch_process(), loop=loop)
+        await task
         return await self.tasks[q+"\t"+n]
 
     async def do_queued_interrogation(self, m, q, n, i, t) -> Dict[
@@ -94,18 +97,24 @@ class Api:
         return self.running_batches
 
     async def finish_queue(self, m, q) -> Dict[str, Dict[str, float]]:
-        with self.queue_lock:
-            if q in self.running_batches[m]:
-                del self.running_batches[m][q]
-        return self.res.pop(q)
+        if q in self.running_batches[m]:
+            del self.running_batches[m][q]
+        if q in self.res:
+            return self.res.pop(q)
+        return self.running_batches
 
     async def batch_process(self) -> None:
+        #  loop = asyncio.get_running_loop()
         while len(self.queue) > 0:
             for m in self.queue:
                 # if zero the queue might just be pending
-                while self.queue[m].qsize() > 0:
-                    with self.queue_lock:
+                while True:
+                    try:
+                        #  q, n, i, t = asyncio.run_coroutine_threadsafe(
+                        #  self.queue[m].get_nowait(), loop).result()
                         q, n, i, t = self.queue[m].get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
                     self.tasks[q+"\t"+n] = asyncio.create_task(
                         self.do_queued_interrogation(m, q, n, i, t) if n != ""
                         else self.finish_queue(m, q)
@@ -113,8 +122,7 @@ class Api:
 
             for model in self.running_batches:
                 if len(self.running_batches[model]) == 0:
-                    with self.queue_lock:
-                        del self.queue[model]
+                    del self.queue[model]
             else:
                 await asyncio.sleep(0.1)
 
@@ -150,20 +158,20 @@ class Api:
     ]:
         """ queue an interrogation, or add to batch """
         if n == '':
-            res = await self.add_to_queue(m, q)
-            print("queue_interrogation1: " + repr(res))
-            return res
-        if n == '<sha256>':
-            n = sha256(i).hexdigest()
-        elif f'{q}#{n}' in self.res[q]:
-            # clobber name if it's already in the queue
-            j = 0
-            while f'{q}#{n}#{j}' in self.res[q]:
-                j += 1
-            n = f'{q}#{n}#{j}'
-        # add image to queue
-        res = await self.add_to_queue(m, q, n, i, t)
-        print("queue_interrogation2: " + repr(res))
+            task = asyncio.create_task(self.add_to_queue(m, q))
+        else:
+            if n == '<sha256>':
+                n = sha256(i).hexdigest()
+            elif f'{q}#{n}' in self.res[q]:
+                # clobber name if it's already in the queue
+                j = 0
+                while f'{q}#{n}#{j}' in self.res[q]:
+                    j += 1
+                n = f'{q}#{n}#{j}'
+            # add image to queue
+            task = asyncio.create_task(self.add_to_queue(m, q, n, i, t))
+        res = await task
+        print( "queue_interrogation: " + repr(res))
         return res
 
     def endpoint_interrogate(self, req: models.TaggerInterrogateRequest):
@@ -179,12 +187,13 @@ class Api:
 
         if q != '':
             res = asyncio.run(self.queue_interrogation(m, q, n, req.image,
-                                                       req.threshold))
+                                                       req.threshold), debug =True)
         else:
             image = decode_base64_to_image(req.image)
             interrogator = utils.interrogators[m]
             res = {"tag": {}, "rating": {}}
-            res["rating"], tag = interrogator.interrogate(image)
+            with self.queue_lock:
+                res["rating"], tag = interrogator.interrogate(image)
 
             for k, v in tag.items():
                 if v > req.threshold:
