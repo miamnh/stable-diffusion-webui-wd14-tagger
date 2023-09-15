@@ -5,6 +5,8 @@ from secrets import compare_digest
 import asyncio
 from collections import defaultdict
 from hashlib import sha256
+import string
+from random import choices
 
 from modules import shared  # pylint: disable=import-error
 from modules.api.api import decode_base64_to_image  # pylint: disable=E0401
@@ -81,13 +83,13 @@ class Api:
         str, Dict[str, float]
     ]:
         self.running_batches[m][q] += 1.0
-        # queue empty to process, not queue
+        # queue and name empty to process, not queue
         res = self.endpoint_interrogate(
             models.TaggerInterrogateRequest(
                 image=i,
                 model=m,
                 threshold=t,
-                name_in_queue=n,
+                name_in_queue='',
                 queue=''
             )
         )
@@ -186,9 +188,17 @@ class Api:
         m, q, n = (req.model, req.queue, req.name_in_queue)
         res: Dict[str, Dict[str, float]] = {}
 
-        if q != '':
+        if q != '' or n != '':
+            if q == '':
+                # generate a random queue name, not in use
+                while True:
+                    q = ''.join(choices(string.ascii_uppercase +
+                                string.digits, k=8))
+                    if q not in self.queue:
+                        break
+                print(f'WD14 tagger api generated queue name: {q}')
             res = asyncio.run(self.queue_interrogation(m, q, n, req.image,
-                                                       req.threshold))
+                              req.threshold), debug=True)
         else:
             image = decode_base64_to_image(req.image)
             interrogator = utils.interrogators[m]
