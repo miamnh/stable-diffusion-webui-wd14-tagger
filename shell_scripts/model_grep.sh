@@ -36,10 +36,15 @@ if [ ! -e "${utilpath}/safetensors_util.py" ]; then
   exit 1
 fi
 
-if [ -z "$1" ]; then
-    echo "Usage: $0 [-p /path/to/stable-diffusion-webui/models/Lora (default: .)] <extended regex>"
-    exit 1
+if [ -n "$1" ]; then
+    ls -1 ${path}/*.safetensors | parallel -n 1 -j $ncpu "python ${utilpath}/safetensors_util.py metadata {} -pm 2>/dev/null |
+    sed -n '1b;p' | jq '.__metadata__.ss_tag_frequency' 2>/dev/null | grep -o -E '\"[^\"]*${1}[^\"]*\": [0-9]+'| sed 's~^~'{}':~p'"
+else
+    tmp=$(mktemp)
+    sed 's/^/"[^\"]*/;s/$/[^\"]*": [0-9]+/' < /dev/stdin > $tmp
+    ls -1 ${path}/*.safetensors | parallel -n 1 -j $ncpu "python ${utilpath}/safetensors_util.py metadata {} -pm 2>/dev/null |
+    sed -n '1b;p' | jq '.__metadata__.ss_tag_frequency' 2>/dev/null | grep -oE -f $tmp | sed 's~^~'{}':~p'"
+    echo rm $tmp
 fi
 
-ls -1 ${path}/*.safetensors | parallel -n 1 -j $ncpu "python ${utilpath}/safetensors_util.py metadata {} -pm 2>/dev/null |
-sed -n '1b;p' | jq '.__metadata__.ss_tag_frequency' 2>/dev/null | grep -o -E '\"[^\"]*${1}[^\"]*\": [0-9]+'| sed 's~^~'{}':~p'"
+
