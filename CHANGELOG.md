@@ -4,6 +4,7 @@ Image interrogation via api receives two extra parameters; empty strings by
 default. `queue`: the name for a queue, which could be e.g. the person or
 subject name. You can leave it empty for the first interrogation, then the
 response will que in a new auto-generated unique name, listed in the response.
+# v1.2.0 (2023-09-16)
 
 Make sure you use this same name as queue, for all interrogations that you want
 to be grouped together. The second parameter is `name_in_queue`: the name for
