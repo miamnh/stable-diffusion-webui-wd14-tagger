@@ -182,7 +182,7 @@ class Api:
         if req.image is None:
             raise HTTPException(404, 'Image not found')
 
-        if req.model not in utils.interrogators:
+        if req.model not in Interrogator.entries.keys():
             raise HTTPException(404, 'Model not found')
 
         m, q, n = (req.model, req.queue, req.name_in_queue)
@@ -201,7 +201,7 @@ class Api:
                               req.threshold), debug=True)
         else:
             image = decode_base64_to_image(req.image)
-            interrogator = utils.interrogators[m]
+            interrogator = Interrogator.entries[m]
             res = {"tag": {}, "rating": {}}
             with self.queue_lock:
                 res["rating"], tag = interrogator.interrogate(image)
@@ -214,7 +214,7 @@ class Api:
 
     def endpoint_interrogators(self):
         return models.TaggerInterrogatorsResponse(
-            models=list(utils.interrogators.keys())
+            models=list(Interrogator.entries.keys())
         )
 
     def endpoint_unload_interrogators(self):
