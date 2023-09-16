@@ -41,7 +41,7 @@ class Api:
             'interrogators',
             self.endpoint_interrogators,
             methods=['GET'],
-            response_model=models.InterrogatorsResponse
+            response_model=models.TaggerInterrogatorsResponse
         )
 
         self.add_api_route(
@@ -54,13 +54,13 @@ class Api:
             'queue-image',
             self.endpoint_queue_image,
             methods=['POST'],
-            response_model=models.QueueImageResponse
+            response_model=models.TaggerQueueImageResponse
         )
         self.add_api_route(
             'batch-process',
             self.endpoint_batch,
             methods=['POST'],
-            response_model=models.BatchResponse
+            response_model=models.TaggerBatchResponse
         )
 
     def auth(self, creds: Optional[HTTPBasicCredentials] = None):
@@ -118,7 +118,7 @@ class Api:
 
         self.images[req.name] = decode_base64_to_image(req.image)
 
-        return models.TaggerPostImageResponse(True)
+        return models.TaggerQueueImageResponse(True)
 
     def endpoint_batch(self, req: models.TaggerBatchRequest):
         """ batch interrogation """
@@ -149,8 +149,8 @@ class Api:
         return models.TaggerBatchResponse(res)
 
     def endpoint_interrogators(self):
-        return models.InterrogatorsResponse(
-            models=list(Interrogator.entries.keys())
+        return models.TaggerInterrogatorsResponse(
+            models=list(utils.interrogators.keys())
         )
 
     def endpoint_unload_interrogators(self):
