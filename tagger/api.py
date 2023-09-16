@@ -78,9 +78,12 @@ class Api:
         if req.image is None:
             raise HTTPException(404, 'Image not found')
 
-        if req.model not in Interrogator.entries.keys():
-            raise HTTPException(404, 'Model not found')
-            req.model = [req.model]
+        req_models = []
+        for i in map(str.strip, req.model.split(',')):
+            if i in utils.interrogators.keys():
+                req_models.append(i)
+            else:
+                raise HTTPException(404, f"Model '{i}' not found")
 
         image = decode_base64_to_image(req.image)
         QData.tags.clear()
@@ -96,7 +99,7 @@ class Api:
         if req.count_threshold:
             QData.count_threshold = req.count_threshold
 
-        for model in req.model:
+        for model in req_models:
             interrogator = utils.interrogators[model]
             with self.queue_lock:
                 data = ('', '', '') + interrogator.interrogate(image)
