@@ -2,7 +2,7 @@
 import os
 from typing import List
 from modules import shared  # pylint: disable=import-error
-from gradio import inputs as gr
+import gradio as gr
 from huggingface_hub import hf_hub_download
 
 # kaomoji from WD 1.4 tagger csv. thanks, Meow-San#5400!
@@ -10,10 +10,8 @@ DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, 3_3,
 
 DEFAULT_OFF = '[name].[output_extension]'
 
-HF_CACHE = os.environ.get(
-    'HUGGINGFACE_HUB_CACHE',  # defaults to "$HF_HOME/hub"
-    str(os.path.join(shared.models_path, 'interrogators')))
-
+HF_CACHE = os.environ.get('HF_HOME', os.environ.get('HUGGINGFACE_HUB_CACHE',
+           str(os.path.join(shared.models_path, 'interrogators'))))
 
 def slider_wrapper(value, elem_id, **kwargs):
     # required or else gradio will throw errors
@@ -124,12 +122,13 @@ def on_ui_settings():
             section=section,
         ),
     )
+    # see huggingface_hub guides/manage-cache
     shared.opts.add_option(
-        key='tagger_hf_hub_down_opts',
+        key='tagger_hf_cache_dir',
         info=shared.OptionInfo(
-            str(f'cache_dir="{HF_CACHE}"'),
-            label='HuggingFace parameters, Comma delimited: arg=value, '
-            'see huggingface_hub docs for available or leave alone.',
+            HF_CACHE,
+            label='HuggingFace cache directory, '
+            'see huggingface_hub guides/manage-cache',
             section=section,
         ),
     )
