@@ -3,9 +3,9 @@ import os
 from pathlib import Path
 import io
 import json
+import inspect
 from re import match as re_match
 from jsonschema import validate
-import inspect
 from platform import uname
 from typing import Tuple, List, Dict, Callable
 from pandas import read_csv
@@ -14,7 +14,6 @@ from numpy import asarray, float32, expand_dims, exp
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 
-from prload import root_dir
 from modules import shared
 from tagger import settings  # pylint: disable=import-error
 from tagger.uiset import QData, IOData  # pylint: disable=import-error
@@ -452,6 +451,8 @@ class HFInterrogator(Interrogator):
         self.model_path = model_path
         self.tags_path = tags_path
         self.model = None
+        self.local_model = None
+        self.local_tags = None
         # tagger_hf_hub_down_opts contains args to hf_hub_download(). Parse
         # and pass only the supported args.
 
