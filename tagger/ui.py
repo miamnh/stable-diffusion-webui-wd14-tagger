@@ -187,7 +187,7 @@ def on_ui_tabs():
                             interactive=True,
                             type="pil"
                         )
-                        image_submit = gr.Button(
+                        img_submit = gr.Button(
                             value='Interrogate image',
                             variant='primary'
                         )
@@ -239,7 +239,7 @@ def on_ui_tabs():
                 with gr.Column():
                     # preset selector
                     with gr.Row(variant='compact'):
-                        available_presets = utils.preset.list()
+                        available_presets = preset.list()
                         selected_preset = gr.Dropdown(
                             label='Preset',
                             choices=available_presets,
@@ -253,7 +253,7 @@ def on_ui_tabs():
                         ui.create_refresh_button(
                             selected_preset,
                             lambda: None,
-                            lambda: {'choices': utils.preset.list()},
+                            lambda: {'choices': preset.list()},
                             'refresh_preset'
                         )
 
@@ -281,20 +281,20 @@ def on_ui_tabs():
                         value='Unload all interrogate models'
                     )
                     with gr.Row(variant='compact'):
-                        tag_input["add"] = utils.preset.component(
+                        tag_input["add"] = preset.component(
                             gr.Textbox,
                             label='Additional tags (comma split)',
                             elem_id='additional-tags'
                         )
                     with gr.Row(variant='compact'):
-                        threshold = utils.preset.component(
+                        threshold = preset.component(
                             gr.Slider,
                             label='Weight threshold',
                             minimum=0,
                             maximum=1,
                             value=QData.threshold
                         )
-                        tag_frac_threshold = utils.preset.component(
+                        tag_frac_threshold = preset.component(
                             gr.Slider,
                             label='Min tag fraction in batch and '
                                   'interrogations',
@@ -303,34 +303,34 @@ def on_ui_tabs():
                             value=QData.tag_frac_threshold,
                         )
                     with gr.Row(variant='compact'):
-                        cumulative = utils.preset.component(
+                        cumulative = preset.component(
                             gr.Checkbox,
                             label='Combine interrogations',
                             value=False
                         )
-                        unload_after = utils.preset.component(
+                        unload_after = preset.component(
                             gr.Checkbox,
                             label='Unload model after running',
                             value=False
                         )
                     with gr.Row(variant='compact'):
-                        tag_input["search"] = utils.preset.component(
+                        tag_input["search"] = preset.component(
                             gr.Textbox,
                             label='Search tag, .. ->',
                             elem_id='search-tags'
                         )
-                        tag_input["replace"] = utils.preset.component(
+                        tag_input["replace"] = preset.component(
                             gr.Textbox,
                             label='-> Replace tag, ..',
                             elem_id='replace-tags'
                         )
                     with gr.Row(variant='compact'):
-                        tag_input["keep"] = utils.preset.component(
+                        tag_input["keep"] = preset.component(
                             gr.Textbox,
                             label='Keep tag, ..',
                             elem_id='keep-tags'
                         )
-                        tag_input["exclude"] = utils.preset.component(
+                        tag_input["exclude"] = preset.component(
                             gr.Textbox,
                             label='Exclude tag, ..',
                             elem_id='exclude-tags'
@@ -464,11 +464,11 @@ def on_ui_tabs():
                        [tag_input[tag] for tag in TAG_INPUTS]
 
         # interrogation events
-        image_submit.click(fn=wrap_gradio_gpu_call(on_interrogate_image_submit),
-             inputs=[image] + common_input, outputs=common_output)
+        img_submit.click(fn=wrap_gradio_gpu_call(on_interrogate_image_submit),
+                         inputs=[image] + common_input, outputs=common_output)
 
         image.change(fn=wrap_gradio_gpu_call(on_interrogate_image),
-             inputs=[image] + common_input, outputs=common_output)
+                     inputs=[image] + common_input, outputs=common_output)
 
         batch_submit.click(fn=wrap_gradio_gpu_call(on_interrogate),
                            inputs=[input_glob, output_dir] + common_input,

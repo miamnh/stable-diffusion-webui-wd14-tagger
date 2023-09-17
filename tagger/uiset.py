@@ -45,6 +45,7 @@ class IOData:
     paths: List[List[str]] = []
     save_tags = True
     err: Set[str] = set()
+    base_dir_last: Optional[str] = None
 
     @classmethod
     def error_msg(cls) -> str:
@@ -152,10 +153,10 @@ class IOData:
         """ set input and output paths for batch mode """
         checked_dirs = set()
         cls.paths = []
-        for path in paths:
-            path = Path(path)
+        for path_str in paths:
+            path = Path(path_str)
             if not cls.save_tags:
-                cls.paths.append([path, '', ''])
+                cls.paths.append([path_str, '', ''])
                 continue
 
             # guess the output path
@@ -175,6 +176,8 @@ class IOData:
             except (TypeError, ValueError):
                 cls.err.add(msg)
 
+            if not cls.output_root:
+                raise ValueError('output_root not set')
             output_dir = cls.output_root.joinpath(
                 *path.parts[base_dir_last_idx + 1:]).parent
 
@@ -197,18 +200,19 @@ class IOData:
 
 class QData:
     """ Query data: contains parameters for the query """
-    add_tags = []
+    add_tags: List[str] = []
     keep_tags = set()
-    exclude_tags = []
-    search_tags = {}
-    replace_tags = []
+    exclude_tags: List[str] = []
+    search_tags: Dict[str, str] = {}
+    replace_tags: List[str] = []
     threshold = 0.35
     tag_frac_threshold = 0.05
     count_threshold = getattr(shared.opts, 'tagger_count_threshold', 100)
 
     # read from db.json, update with what should be written to db.json:
     json_db = None
-    weighed = (defaultdict(list), defaultdict(list))
+    weighed: Tuple[Dict[str, list], Dict[str, list]] = \
+        (defaultdict(list), defaultdict(list))
     query = {}
 
     # representing the (cumulative) current interrogations

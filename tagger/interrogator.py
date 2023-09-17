@@ -3,8 +3,10 @@ import os
 from pathlib import Path
 import io
 import json
-from jsonschema import validate
 import inspect
+import sys
+import shutil
+import requests
 from re import match as re_match
 from jsonschema import validate
 from platform import uname
@@ -18,6 +20,7 @@ from huggingface_hub import hf_hub_download
 from modules import shared
 from tagger import settings  # pylint: disable=import-error
 from tagger.uiset import QData, IOData  # pylint: disable=import-error
+from preload import root_dir
 from . import dbimutils  # pylint: disable=import-error # noqa
 
 Its = settings.InterrogatorSettings
@@ -45,6 +48,15 @@ else:
 
 print(f'== WD14 tagger {TF_DEVICE_NAME}, {uname()} ==')
 
+ddp_path = shared.cmd_opts.deepdanbooru_projects_path
+if ddp_path is None:
+    ddp_path = Path(shared.models_path, 'deepdanbooru')
+os.makedirs(ddp_path, exist_ok=True)
+
+onnx_path = shared.cmd_opts.onnxtagger_path
+if onnx_path is None:
+    onnx_path = Path(shared.models_path, 'TaggerOnnx')
+os.makedirs(onnx_path, exist_ok=True)
 
 class Interrogator:
     """ Interrogator class for tagger """
@@ -105,37 +117,20 @@ class Interrogator:
                 if not it_path.exists():
                     raise FileNotFoundError(f'{it_path} not found.')
 
-                raw = json.loads(it_path)
-                schema = root_dir.joinpath('json_schema',
-                                           'interrogators_v1_schema.json')
-                validate(raw, json.loads(schema.read_text()))
+            raw = json.loads(it_path.read_text())
+            schema = root_dir.joinpath('json_schema',
+                                       'interrogators_v1_schema.json')
+            validate(raw, json.loads(schema.read_text()))
 
-                for class_name, it in raw.items():
-                    if class_name == "DeepDanbooruInterrogator":
-                        It_type = DeepDanbooruInterrogator
-                    elif class_name == "WaifuDiffusionInterrogator":
-                        It_type = WaifuDiffusionInterrogator
-                    elif class_name == "MLDanbooruInterrogator":
-                        It_type = MLDanbooruInterrogator
-                    else:
-                        raise ValueError(f'Unimplemented: {it["class"]}')
-                    for name, obj in it.items():
-                        if name not in obj:
-                            obj[name] = name
-                        cls.entries[name] = It_type(**obj)
+            for class_name, it in raw.items():
+                if class_name[-12:] == "Interrogator":
+                    It_type = getattr(sys.modules[__name__], class_name)
+                for name, obj in it.items():
+                    if "name" not in obj:
+                        obj["name"] = name
+                    cls.entries[name] = It_type(**obj)
 
-                    cls.entries[name] = It_type(**it["repo_specs"])
-
-    # load deepdanbooru project
-        ddp_path = shared.cmd_opts.deepdanbooru_projects_path
-        if ddp_path is None:
-            ddp_path = Path(shared.models_path, 'deepdanbooru')
-        onnx_path = shared.cmd_opts.onnx_path
-        if onnx_path is None:
-            onnx_path = Path(shared.models_path, 'TaggerOnnx')
-        os.makedirs(ddp_path, exist_ok=True)
-        os.makedirs(onnx_path, exist_ok=True)
-
+        # load deepdanbooru project
         for path in os.scandir(ddp_path):
             print(f"Scanning {path} as deepdanbooru project")
             if not path.is_dir():
@@ -162,32 +157,20 @@ class Interrogator:
             if len(onnx_files) != 1:
                 print(f"Warning: {path}: multiple .onnx models => skipped")
                 continue
-            local_path = Path(path, onnx_files[0].name)
 
-            csv = [x for x in os.scandir(path) if x.name.endswith('.csv')]
-            if len(csv) == 0:
+            for csv in os.scandir(path):
+                if csv.name.endswith('.csv') and "tag" in csv.name.lower() \
+                   or "select" in csv.name.lower():
+                    tags_path = Path(path, csv.name)
+                    break
+            else:
                 print(f"Warning: {path}: no selected tags .csv file, skipped")
                 continue
 
-            def tag_select_csvs_up_front(k):
-                k = k.name.lower()
-                return -1 if "tag" in k or "select" in k else 1
-
-            csv.sort(key=tag_select_csvs_up_front)
-            tags_path = Path(path, csv[0])
-
+            local_path = Path(path, onnx_files[0].name)
             if path.name not in cls.entries:
-                if path.name == 'wd-v1-4-convnextv2-tagger-v2':
-                    cls.entries[path.name] = WaifuDiffusionInterrogator(
-                        path.name,
-                        repo_id='SmilingWolf/SW-CV-ModelZoo'
-                    )
-                elif path.name == 'Z3D-E621-Convnext':
-                    cls.entries[path.name] = WaifuDiffusionInterrogator(
-                        'Z3D-E621-Convnext')
-                else:
-                    raise NotImplementedError(f"Add {path.name} resolution "
-                                              "similar to above here")
+                print(f"Warning: {path} not configured in interrogators.json")
+                continue
 
             cls.entries[path.name].local_model = str(local_path)
             cls.entries[path.name].local_tags = str(tags_path)
@@ -345,11 +328,30 @@ class Interrogator:
 
 class DeepDanbooruInterrogator(Interrogator):
     """ Interrogator for DeepDanbooru models """
-    def __init__(self, name: str, project_path: os.PathLike) -> None:
+    def __init__(self, name: str, project_path=None, zip='') -> None:
         super().__init__(name)
+
+        if project_path is None:
+            project_path = Path(ddp_path, name)
+            if not project_path.is_dir():
+                if zip == '':
+                    raise FileNotFoundError(f'{project_path} does not exist')
+                os.makedirs(project_path)
+                response = requests.get(zip, stream=True)
+                local_zip = project_path / zip.split('/')[-1]
+                with open(local_zip, 'wb') as f:
+                    for data in tqdm(response.iter_content(),
+                                     desc=f'Downloading {zip}'):
+                        f.write(data)
+                shutil.unpack_archive(local_zip, project_path)
+                os.remove(local_zip)
+
         self.project_path = project_path
         self.model = None
         self.tags = None
+
+    def set_project_path(self, path: os.PathLike) -> None:
+        self.project_path = path
 
     def load(self) -> None:
         print(f'Loading {self.name} from {str(self.project_path)}')

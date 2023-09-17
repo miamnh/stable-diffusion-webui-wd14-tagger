@@ -1,0 +1,71 @@
+{
+  "type": "object",
+  "properties": {
+    "MLDanbooruInterrogator": {
+      "type": "object",
+      "patternProperties": {
+        ".*": { "$ref": "#/$defs/huggingfaceInterrogator" }
+      }
+    },
+    "WaifuDiffusionInterrogator": {
+      "type": "object",
+      "patternProperties": {
+        ".*": { "$ref": "#/$defs/huggingfaceInterrogator" }
+      }
+    },
+    "DeepDanbooruInterrogator": {
+      "type": "object",
+      "patternProperties": {
+        ".*": {
+          "type": "object",
+          "properties": {
+            "zip": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "MLDanbooruInterrogator": {
+      "type": "object",
+      "patternProperties": {
+        ".*": { "$ref": "#/$defs/huggingfaceInterrogator" }
+      }
+    },
+    "additionalProperties": false
+  },    
+  "$defs": {
+    "huggingfaceInterrogator": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "model_path": { "type": "string" },
+        "repo_id": { "type": "string" },
+        "filename": { "type": "string" },
+        "subfolder": { "type": "string" },
+        "repo_type": { "type": "string" },
+        "revision": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "library_name": { "type": "string" },
+        "library_version": { "type": "string" },
+        "cache_dir": { "type": "string" },
+        "local_dir": { "type": "string" },
+        "local_dir_use_symlinks": { "type": "string" },
+        "user_agent": { "type": "string" },
+        "force_download": { "type": "boolean" },
+        "force_filename": { "type": "string" },
+        "proxies": { "type": "string" },
+        "etag_timeout": { "type": "number" },
+        "resume_download": { "type": "boolean" },
+        "token": { "type": "string" },
+        "local_files_only": { "type": "boolean" },
+        "legacy_cache_layout": { "type": "boolean" }
+      },
+      "required": [
+        "name",
+        "repo_id"
+      ],
+      "additionalProperties": false
+    }
+  }
+}   
+
