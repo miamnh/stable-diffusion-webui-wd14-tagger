@@ -5,8 +5,8 @@ import io
 import json
 import inspect
 import sys
-import shutil
-import requests
+from shutil import unpack_archive
+from requests import get as http_get
 from re import match as re_match
 from jsonschema import validate
 from platform import uname
@@ -326,6 +326,18 @@ class Interrogator:
         raise NotImplementedError()
 
 
+def download_and_extract(url: str, path: Path, rm_zip=True) -> None:
+    """ Download and extract a zip file """
+    response = http_get(url, stream=True)
+    local_zip = path / url.split('/')[-1]
+    with open(local_zip, 'wb') as f:
+        for data in tqdm(response.iter_content(), desc=f'Downloading {url}'):
+            f.write(data)
+    unpack_archive(local_zip, path)
+    if rm_zip:
+        os.remove(local_zip)
+
+
 class DeepDanbooruInterrogator(Interrogator):
     """ Interrogator for DeepDanbooru models """
     def __init__(self, name: str, project_path=None, zip='') -> None:
@@ -337,21 +349,11 @@ class DeepDanbooruInterrogator(Interrogator):
                 if zip == '':
                     raise FileNotFoundError(f'{project_path} does not exist')
                 os.makedirs(project_path)
-                response = requests.get(zip, stream=True)
-                local_zip = project_path / zip.split('/')[-1]
-                with open(local_zip, 'wb') as f:
-                    for data in tqdm(response.iter_content(),
-                                     desc=f'Downloading {zip}'):
-                        f.write(data)
-                shutil.unpack_archive(local_zip, project_path)
-                os.remove(local_zip)
+                download_and_extract(zip, project_path)
 
         self.project_path = project_path
         self.model = None
         self.tags = None
-
-    def set_project_path(self, path: os.PathLike) -> None:
-        self.project_path = path
 
     def load(self) -> None:
         print(f'Loading {self.name} from {str(self.project_path)}')
