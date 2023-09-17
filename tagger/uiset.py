@@ -128,7 +128,7 @@ class IOData:
 
         # interrogating in a directory with no pics, still flush the cache
         if len(path_mtimes) > 0 and cls.last_path_mtimes == path_mtimes:
-            print('No changed images')
+            # No (changed) images, keep the data
             return
 
         QData.clear(2)

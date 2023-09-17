@@ -456,8 +456,8 @@ class HFInterrogator(Interrogator):
         self.model_path = model_path
         self.tags_path = tags_path
         self.model = None
-        self.local_model = None
-        self.local_tags = None
+        self.local_model = ''
+        self.local_tags = ''
         # tagger_hf_hub_down_opts contains args to hf_hub_download(). Parse
         # and pass only the supported args.
 
