@@ -1,4 +1,6 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Interrogator Configurations",
   "type": "object",
   "properties": {
     "MLDanbooruInterrogator": {
@@ -38,6 +40,8 @@
       "type": "object",
       "properties": {
         "name": { "type": "string" },
+        "local_model": { "type": "string" },
+        "local_tags": { "type": "string" },
         "model_path": { "type": "string" },
         "repo_id": { "type": "string" },
         "filename": { "type": "string" },
@@ -60,9 +64,21 @@
         "local_files_only": { "type": "boolean" },
         "legacy_cache_layout": { "type": "boolean" }
       },
-      "required": [
-        "name",
-        "repo_id"
+      "$comment": "repo_id is required if you want to actually download the model",
+      "oneOf": [
+        {
+          "required": [
+            "name",
+            "repo_id"
+          ]
+        },
+        {
+          "required": [
+            "name",
+            "local_model",
+            "local_tags"
+          ]
+        }
       ],
       "additionalProperties": false
     }

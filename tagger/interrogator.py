@@ -58,6 +58,7 @@ if onnx_path is None:
     onnx_path = Path(shared.models_path, 'TaggerOnnx')
 os.makedirs(onnx_path, exist_ok=True)
 
+
 class Interrogator:
     """ Interrogator class for tagger """
     # the raw input and output.
@@ -126,51 +127,10 @@ class Interrogator:
                 if class_name[-12:] == "Interrogator":
                     It_type = getattr(sys.modules[__name__], class_name)
                 for name, obj in it.items():
+                    print(f"Loading {name} as {class_name}")
                     if "name" not in obj:
                         obj["name"] = name
                     cls.entries[name] = It_type(**obj)
-
-        # load deepdanbooru project
-        for path in os.scandir(ddp_path):
-            if not path.is_dir():
-                continue
-            print(f"Scanning {path} as deepdanbooru project")
-
-            if not Path(path, 'project.json').is_file():
-                print(f"Warning: {path} has no project.json, skipped")
-                continue
-
-            cls.entries[path.name] = DeepDanbooruInterrogator(path.name, path)
-        # scan for onnx models as well
-        for path in os.scandir(onnx_path):
-            if not path.is_dir():
-                continue
-            print(f"Scanning {path} as onnx model")
-
-            onnx_files = []
-            for file_name in os.scandir(path):
-                if file_name.name.endswith('.onnx'):
-                    onnx_files.append(file_name)
-
-            if len(onnx_files) != 1:
-                print(f"Warning: {path}: multiple .onnx models => skipped")
-                continue
-
-            for csv in os.scandir(path):
-                if csv.name.endswith('.csv') and "tag" in csv.name.lower() \
-                   or "select" in csv.name.lower():
-                    tags_path = Path(path, csv.name)
-                    break
-            else:
-                print(f"Warning: {path}: no selected tags .csv file, skipped")
-                continue
-
-            if path.name not in cls.entries:
-                print(f"Warning: {path} not configured in interrogators.json")
-                continue
-            local_path = Path(path, onnx_files[0].name)
-            cls.entries[path.name].local_model = str(local_path)
-            cls.entries[path.name].local_tags = str(tags_path)
 
         return sorted(i.name for i in cls.entries.values())
 
@@ -194,8 +154,8 @@ class Interrogator:
         # run_mode 0 is dry run, 1 means run (alternating), 2 means disabled
         self.run_mode = 0 if hasattr(self, "large_batch_interrogate") else 2
         # default path if not overridden by download
-        self.local_model = None
-        self.local_tags = None
+        self.local_model = ''
+        self.local_tags = ''
         # XXX don't Interrogator.refresh()-ception here
 
     def load(self) -> bool:
@@ -453,8 +413,6 @@ class HFInterrogator(Interrogator):
         self.model_path = model_path
         self.tags_path = tags_path
         self.model = None
-        self.local_model = ''
-        self.local_tags = ''
         # tagger_hf_hub_down_opts contains args to hf_hub_download(). Parse
         # and pass only the supported args.
 
@@ -470,10 +428,6 @@ class HFInterrogator(Interrogator):
                     continue
             print(f"Warning: interrogators.json: model {self.name}: "
                   f"parameter {k} unsupported or or wrong type.")
-
-        if 'repo_id' not in self.hf_params:
-            print(f"Warning: interrogators.json: HuggingFace model {self.name}"
-                  " lacks a repo_id. If not already local, download may fail.")
 
         attrs = getattr(shared.opts, 'tagger_hf_hub_down_opts',
                         f'cache_dir="{Its.hf_cache}"')
@@ -506,43 +460,22 @@ class HFInterrogator(Interrogator):
                       "Invalid for hf_hub_download() => ignored.")
 
     def download(self) -> Tuple[str, str]:
-        repo_id = self.hf_params.get('repo_id', '(?)')
-        print(f"Loading {self.name} model file from {repo_id}")
-        if self.local_model == '':
-            Interrogator.refresh()
         paths = [self.local_model, self.local_tags]
+        try:
+            # To prevent download don't set repo_id, export HF_HUB_OFFLINE=1
+            repo_id = self.hf_params['repo_id']
 
-        data = {}
-        for k in self.repo_specs:
-            if k in self.hf_params:
-                data[k] = self.hf_params[k]
+            print(f"(Down)Loading {self.name} model file from {repo_id}")
+            for i, filename in enumerate([self.model_path, self.tags_path]):
+                self.hf_params['filename'] = filename
+                paths[i] = hf_hub_download(**self.hf_params)
+        except Exception as err:
+            print(f"Warning: {self.name}: {err} (might be as expected)")
+            for i in range(2):
+                if not os.path.isabs(paths[i]):
+                    paths[i] = os.path.join(shared.models_path, paths[i])
+            pass
 
-        # check if the model is up to date
-        info_path = Path(self.local_model).with_suffix('.info')
-        if info_path.exists():
-
-            if all(os.path.exists(p) for p in paths):
-                with open(info_path, 'r') as filen:
-                    try:
-                        old_data = json.load(filen)
-                        if old_data == data:
-                            print(f"Model {self.name} is up to date.")
-                            return paths
-                    except json.decoder.JSONDecodeError:
-                        pass
-
-            try:
-                for i, filen in enumerate([self.model_path, self.tags_path]):
-                    self.hf_params['filename'] = filen
-                    paths[i] = hf_hub_download(**self.hf_params)
-            except Exception as err:
-                print(f"hf_hub_download({self.hf_params}: {err}")
-                return paths
-
-        # write the repo_specs to a json alongside the model so we can
-        # check if the model is up to date
-        with open(info_path, 'w') as filen:
-            json.dump(data, filen)
         return paths
 
     def load_model(self, model_path) -> None:
