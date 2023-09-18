@@ -132,10 +132,9 @@ class Interrogator:
 
         # load deepdanbooru project
         for path in os.scandir(ddp_path):
-            print(f"Scanning {path} as deepdanbooru project")
             if not path.is_dir():
-                print(f"Warning: {path} is not a directory, skipped")
                 continue
+            print(f"Scanning {path} as deepdanbooru project")
 
             if not Path(path, 'project.json').is_file():
                 print(f"Warning: {path} has no project.json, skipped")
@@ -144,10 +143,9 @@ class Interrogator:
             cls.entries[path.name] = DeepDanbooruInterrogator(path.name, path)
         # scan for onnx models as well
         for path in os.scandir(onnx_path):
-            print(f"Scanning {path} as onnx model")
             if not path.is_dir():
-                print(f"Warning: {path} is not a directory, skipped")
                 continue
+            print(f"Scanning {path} as onnx model")
 
             onnx_files = []
             for file_name in os.scandir(path):
@@ -167,11 +165,10 @@ class Interrogator:
                 print(f"Warning: {path}: no selected tags .csv file, skipped")
                 continue
 
-            local_path = Path(path, onnx_files[0].name)
             if path.name not in cls.entries:
                 print(f"Warning: {path} not configured in interrogators.json")
                 continue
-
+            local_path = Path(path, onnx_files[0].name)
             cls.entries[path.name].local_model = str(local_path)
             cls.entries[path.name].local_tags = str(tags_path)
 
