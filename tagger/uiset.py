@@ -37,6 +37,12 @@ ItRetTP = Tuple[
 ]
 
 
+def format_output_filename(path: Path, format='[name].[output_extension]') -> str:
+    info = tags_format.Info(path, 'txt')
+    fmt = partial(lambda info, m: tags_format.parse(m, info), info)
+    return tags_format.pattern.sub(fmt, format)
+
+
 class IOData:
     """ data class for input and output paths """
     last_path_mtimes = None
@@ -119,7 +125,7 @@ class IOData:
         path_mtimes = []
         for filename in glob(input_glob, recursive=recursive):
             if not os.path.isdir(filename):
-                ext = os.path.splitext(filename)[1].lower()
+                ext = os.path.splitext(filename)[-1].lower()
                 if ext in supported_extensions:
                     path_mtimes.append(os.path.getmtime(filename))
                     paths.append(filename)
@@ -163,16 +169,11 @@ class IOData:
             base_dir_last_idx = path.parts.index(cls.base_dir_last)
             # format output filename
 
-            info = tags_format.Info(path, 'txt')
-            fmt = partial(lambda info, m: tags_format.parse(m, info), info)
-
             msg = 'Invalid output format'
             cls.err.discard(msg)
             try:
-                formatted_output_filename = tags_format.pattern.sub(
-                    fmt,
-                    Its.output_filename_format
-                )
+                formatted_output_filename = format_output_filename(
+                    path, format=Its.output_filename_format)
             except (TypeError, ValueError):
                 cls.err.add(msg)
 
@@ -483,7 +484,6 @@ class QData:
                 if re_match(regex, tag):
                     tag = re_sub(regex, cls.replace_tags[i], tag)
                     break
-
         return tag
 
     @classmethod

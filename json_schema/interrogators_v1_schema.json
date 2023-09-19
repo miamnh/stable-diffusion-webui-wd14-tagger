@@ -40,7 +40,8 @@
           "type": "object",
           "properties": {
             "path": { "type": "string" },
-            "val": { "type": "number", "default": 1.0 }
+            "format": { "type": "string", "default": "[name].[output_extension]" },
+            "value": { "type": "number", "default": 1.0 }
           },
           "required": [
             "path"

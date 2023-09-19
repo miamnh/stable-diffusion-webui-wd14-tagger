@@ -19,7 +19,8 @@ from huggingface_hub import hf_hub_download
 
 from modules import shared
 from tagger import settings  # pylint: disable=import-error
-from tagger.uiset import QData, IOData  # pylint: disable=import-error
+from tagger.uiset import QData, IOData, supported_extensions, \
+                          format_output_filename
 from preload import root_dir
 from . import dbimutils  # pylint: disable=import-error # noqa
 
@@ -487,33 +488,37 @@ class HFInterrogator(Interrogator):
 
 class FromFileInterrogator(Interrogator):
     """ Pseudo Interrogator reading preinterrogated tags files """
-    def __init__(self, name: str, path: os.PathLike, val=1.0) -> None:
+    def __init__(
+        self, name: str, path, format='[name].[output_extension]', value=1.0
+    ) -> None:
         super().__init__(name)
-        self.path = path
-        self.val = val
-        self.tags = None
+        self.path = Path(self.path)
+        self.val = value
+        self.format = format
+        if format == Its.output_filename_format and path == '':
+            raise ValueError(f"tagsfiles will ne overwritten with {format}")
+        self.tags = {}
 
     def load(self) -> None:
         print(f'Loading {self.name} from {str(self.path)}')
+        if self.path == '':
+            return
+
         # self.path is a directory
-        if not os.path.isdir(self.path):
+        if not os.path.isdir(Path(self.path)):
             raise ValueError(f'{self.path} is not a directory')
-        else:
-            self.tags = {}
-            for f in os.listdir(self.path):
-                self.tags[f] = {}
-                self.load_file(f)
 
     def load_file(self, tags_file: str) -> None:
-        image_name = str(tags_file).split('/')[-1].split('.')[0]
+        basename = '.'.join(str(tags_file).split('/')[-1].split('.')[:-1])
+        self.tags[basename] = {}
         with open(tags_file, 'r') as f:
             for line in f:
-                for x in map(str.split, line.split(',')):
+                for x in map(str.strip, line.split(',')):
                     if x[0] == '(' and x[-1] == ')' and ':' in x:
                         tag, val = x[1:-1].split(':')
-                        self.tags[image_name][tag] = float(val)
+                        self.tags[basename][tag] = float(val)
                     else:
-                        self.tags[image_name][x] = self.val
+                        self.tags[basename][x] = self.val
 
     def unload(self) -> None:
         self.tags = {}
@@ -525,7 +530,16 @@ class FromFileInterrogator(Interrogator):
         Dict[str, float],  # rating confidences
         Dict[str, float]  # tag confidences
     ]:
-        return {}, self.tags[image.filename]
+        basename = '.'.join(image.filename.split('/')[-1].split('.')[:-1])
+        path = Path(image.filename)
+        tags_filename = format_output_filename(path, self.format)
+        if self.path == '':
+            dir = path.parent
+        else:
+            dir = self.path
+        tags_filename = os.path.join(dir, tags_filename)
+        self.load_file(tags_filename)
+        return {}, self.tags[basename]
 
 
 class WaifuDiffusionInterrogator(HFInterrogator):

@@ -49,6 +49,13 @@
       "zip": "https://github.com/KichangKim/DeepDanbooru/releases/download/v4-20200814-sgd-e30/deepdanbooru-v4-20200814-sgd-e30.zip"
     }
   },
+  "FromFileInterrogator": {
+    "[name].[hash:sha1].[output_extension]": {
+      "format": "[name].[hash:sha1].[output_extension]",
+      "path": "",
+      "value": 1.0
+    }
+  },
   "MLDanbooruInterrogator": {
     "mld-caformer.dec-5-97527" : {
        "model_path" : "ml_caformer_m36_dec-5-97527.onnx",
