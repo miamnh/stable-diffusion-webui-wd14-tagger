@@ -485,6 +485,49 @@ class HFInterrogator(Interrogator):
         print(f'Loaded {self.name} model from {model_path}')
 
 
+class FromFileInterrogator(Interrogator):
+    """ Pseudo Interrogator reading preinterrogated tags files """
+    def __init__(self, name: str, path: os.PathLike, val=1.0) -> None:
+        super().__init__(name)
+        self.path = path
+        self.val = val
+        self.tags = None
+
+    def load(self) -> None:
+        print(f'Loading {self.name} from {str(self.path)}')
+        # self.path is a directory
+        if not os.path.isdir(self.path):
+            raise ValueError(f'{self.path} is not a directory')
+        else:
+            self.tags = {}
+            for f in os.listdir(self.path):
+                self.tags[f] = {}
+                self.load_file(f)
+
+    def load_file(self, tags_file: str) -> None:
+        image_name = str(tags_file).split('/')[-1].split('.')[0]
+        with open(tags_file, 'r') as f:
+            for line in f:
+                for x in map(str.split, line.split(',')):
+                    if x[0] == '(' and x[-1] == ')' and ':' in x:
+                        tag, val = x[1:-1].split(':')
+                        self.tags[image_name][tag] = float(val)
+                    else:
+                        self.tags[image_name][x] = self.val
+
+    def unload(self) -> None:
+        self.tags = {}
+
+    def interrogate(
+        self,
+        image: Image
+    ) -> Tuple[
+        Dict[str, float],  # rating confidences
+        Dict[str, float]  # tag confidences
+    ]:
+        return {}, self.tags[image.filename]
+
+
 class WaifuDiffusionInterrogator(HFInterrogator):
     """ Interrogator for Waifu Diffusion models """
     def __init__(

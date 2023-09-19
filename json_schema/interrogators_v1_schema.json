@@ -33,8 +33,24 @@
         ".*": { "$ref": "#/$defs/huggingfaceInterrogator" }
       }
     },
+    "FromFileInterrogator": {
+      "type": "object",
+      "patternProperties": {
+        ".*": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string" },
+            "val": { "type": "number", "default": 1.0 }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
     "additionalProperties": false
-  },    
+  },
   "$defs": {
     "huggingfaceInterrogator": {
       "type": "object",
