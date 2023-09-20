@@ -492,7 +492,7 @@ class FromFileInterrogator(Interrogator):
         self, name: str, path, format='[name].[output_extension]', value=1.0
     ) -> None:
         super().__init__(name)
-        self.path = Path(self.path)
+        self.path = Path(path)
         self.val = value
         self.format = format
         if format == Its.output_filename_format and path == '':
