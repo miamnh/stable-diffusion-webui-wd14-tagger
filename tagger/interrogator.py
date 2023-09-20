@@ -119,12 +119,8 @@ class Interrogator:
                 if not it_path.exists():
                     raise FileNotFoundError(f'{it_path} not found.')
 
-            raw = json.loads(it_path.read_text())
-            schema = root_dir.joinpath('json_schema',
-                                       'interrogators_v1_schema.json')
-            validate(raw, json.loads(schema.read_text()))
-
-            for class_name, it in raw.items():
+            entries = settings.load_interrogator_and_schema()[0]
+            for class_name, it in entries.items():
                 if class_name[-12:] == "Interrogator":
                     It_type = getattr(sys.modules[__name__], class_name)
                 for name, obj in it.items():

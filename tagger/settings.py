@@ -1,9 +1,12 @@
 """Settings tab entries for the tagger module"""
 import os
-from typing import List
+from typing import List, Tuple
 from modules import shared  # pylint: disable=import-error
 import gradio as gr
 from huggingface_hub import hf_hub_download
+from preload import root_dir
+from jsonschema import validate
+import json
 
 # kaomoji from WD 1.4 tagger csv. thanks, Meow-San#5400!
 DEFAULT_KAMOJIS = '0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, 3_3, 6_9, >_o, @_@, ^_^, o_o, u_u, x_x, |_|, ||_||'  # pylint: disable=line-too-long # noqa: E501
@@ -13,6 +16,20 @@ DEFAULT_OFF = '[name].[output_extension]'
 HF_CACHE = os.environ.get(
     'HUGGINGFACE_HUB_CACHE',  # defaults to "$HF_HOME/hub"
     str(os.path.join(shared.models_path, 'interrogators')))
+
+
+def load_interrogator_and_schema() -> Tuple[List[str], List[str]]:
+    it_path = root_dir.joinpath("interrogators.json")
+    if not it_path.exists():
+        it_path = root_dir.joinpath("default/interrogators.json")
+        if not it_path.exists():
+            raise FileNotFoundError(f'{it_path} not found.')
+
+    entries = json.loads(it_path.read_text())
+    schema = json.loads(root_dir.joinpath('json_schema',
+                        'interrogators_v1_schema.json').read_text())
+    validate(entries, schema)
+    return entries, schema
 
 
 def slider_wrapper(value, elem_id, **kwargs):
