@@ -10,7 +10,7 @@ ncpu=$(nproc --all)
 path=.
 utilpath=.
 
-while [ $# -gt 0 ]; do
+while [ $# -gt 1 ]; do
     case "$1" in
       -h|--help)
         echo "Usage: $0 [ -j ncpu] [-p path] [-u utilpath] <extended regex>"
@@ -37,9 +37,11 @@ if [ ! -e "${utilpath}/safetensors_util.py" ]; then
 fi
 
 if [ -n "$1" ]; then
+    echo "reading from $1 with $ncpu cpus" 1>&2
     ls -1 ${path}/*.safetensors | parallel -n 1 -j $ncpu "python ${utilpath}/safetensors_util.py metadata {} -pm 2>/dev/null |
     sed -n '1b;p' | jq '.__metadata__.ss_tag_frequency' 2>/dev/null | grep -o -E '\"[^\"]*${1}[^\"]*\": [0-9]+'| sed 's~^~'{}':~p'"
 else
+    echo "reading from stdin" 1>&2
     tmp=$(mktemp)
     sed 's/^/"[^\"]*/;s/$/[^\"]*": [0-9]+/' < /dev/stdin > $tmp
     ls -1 ${path}/*.safetensors | parallel -n 1 -j $ncpu "python ${utilpath}/safetensors_util.py metadata {} -pm 2>/dev/null |
